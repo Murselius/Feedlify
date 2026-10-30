@@ -1,39 +1,16 @@
 import { StatusBar } from 'expo-status-bar';
-import { Button, FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
-import React, { useEffect, useState } from 'react';
+import { StyleSheet, Text } from 'react-native';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 
-type Purchase = {
-  id: number;
-  product: string;
-  amount: string;
-};
-
 export default function App() {
-  const [product, setProduct] = useState('');
-  const [amount, setAmount] = useState('');
-  const [purchases, setPurchases] = useState<Purchase[]>([]);
-
-  const handleFetch = async () => {
-  };
-
-  const initialize = async () => {
-  };
-
-  useEffect(() => {
-    void initialize();
-  }, []);
-
-  const handleSave = async () => {
-  };
-
-  const handleDelete = async (id: number) => {
-  };
-
   return (
     <SafeAreaProvider>
       <SafeAreaView style={styles.container}>
-        <StatusBar style="auto" />
+        <StatusBar style="dark" />
+        <Text style={styles.title}>Feedlify</Text>
+        <Text style={styles.description}>
+          Keeping Your Pets Fed on Time
+        </Text>
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -42,37 +19,19 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
-    padding: 16,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#aaa',
-    padding: 10,
-    marginBottom: 10,
-  },
-  list: {
-    width: '100%',
-  },
-  item: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#ccc',
+    backgroundColor: '#F7F7F5',
+    padding: 24,
+    justifyContent: 'center',
   },
   title: {
-    fontWeight: 'bold',
-    fontSize: 20,
-    color: 'blue',
-    paddingTop: 24,
-    paddingBottom: 8,
+    fontSize: 36,
+    fontWeight: '700',
+    color: '#2563EB',
+    marginBottom: 12,
   },
-  itemText: {
-    fontSize: 16,
-  },
-  bought: {
-    color: '#0000FF',
+  description: {
+    fontSize: 18,
+    lineHeight: 26,
+    color: '#374151',
   },
 });

@@ -1,6 +1,6 @@
 {
-  "name": "laskin",
-  "version": "1.0.0",
+  "name": "feedlify",
+  "version": "0.1.0",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
