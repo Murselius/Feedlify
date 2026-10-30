@@ -1,17 +1,16 @@
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text } from 'react-native';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
+import RootNavigator from './src/navigation/RootNavigator';
+import { NavigationContainer } from '@react-navigation/native';
 
 export default function App() {
   return (
     <SafeAreaProvider>
-      <SafeAreaView style={styles.container}>
-        <StatusBar style="dark" />
-        <Text style={styles.title}>Feedlify</Text>
-        <Text style={styles.description}>
-          Keeping Your Pets Fed on Time
-        </Text>
-      </SafeAreaView>
+      <StatusBar style="dark" />
+      <NavigationContainer>
+        <RootNavigator />
+      </NavigationContainer>
     </SafeAreaProvider>
   );
 }
