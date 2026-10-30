@@ -3,6 +3,7 @@ import { StyleSheet, Text } from 'react-native';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import RootNavigator from './src/navigation/RootNavigator';
 import { NavigationContainer } from '@react-navigation/native';
+import './src/services/firebase';
 
 export default function App() {
   return (
