@@ -18,4 +18,4 @@ for (const [key, value] of Object.entries(firebaseConfig)) {
 }
 
 //estää saman Firebase-sovelluksen alustamisen uudelleen
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+export const firebaseApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();

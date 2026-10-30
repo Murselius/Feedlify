@@ -1,6 +1,7 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import HomeScreen from '../screens/HomeScreen';
 import PetsScreen from '../screens/PetsScreen';
+import RegisterScreen from '../screens/RegisterScreen';
 import type { RootStackParamList } from './types';
 
 /**
@@ -23,6 +24,12 @@ export default function RootNavigator() {
                 name="Pets"
                 component={PetsScreen}
                 options={{ title: 'Your Pets' }}
+            />
+
+            <Stack.Screen
+                name="Register"
+                component={RegisterScreen}
+                options={{ title: 'Register' }}
             />
         </Stack.Navigator>
     );

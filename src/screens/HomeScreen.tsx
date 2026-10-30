@@ -2,6 +2,7 @@ import { Button, StyleSheet, Text } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../hooks/useAuth';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
@@ -9,6 +10,8 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 // Komponentti näyttää sovelluksen etusivun ja painikkeen jolla käyttäjä siirtyy lemmikkinäkymään.
 
 export default function HomeScreen({ navigation }: Props) {
+  const { user, loading } = useAuth();
+
   return (
     <SafeAreaView style={styles.container}
         edges={['bottom', 'left', 'right']}>
@@ -18,10 +21,21 @@ export default function HomeScreen({ navigation }: Props) {
           Keeping your pets fed on time
         </Text>
 
+        <Text style={styles.description}>
+          {loading ? 'Loading...' : user ? `Logged in as ${user.email}` : 'Not logged in'}
+        </Text>
+
         <Button
           title="Show Pets"
           onPress={() => navigation.navigate('Pets')}
         />
+
+        {!loading && !user && (
+            <Button
+                title="Register"
+                onPress={() => navigation.navigate('Register')}
+            />
+        )}
     </SafeAreaView>
     );
 }
