@@ -1,43 +1,77 @@
-import { Button, StyleSheet, Text } from 'react-native';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { RootStackParamList } from '../navigation/types';
+import { useState } from 'react';
+import { Button, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { signOut } from 'firebase/auth';
+
+import { auth } from '../services/auth';
 import { useAuth } from '../hooks/useAuth';
+import type { RootStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
-
-// Komponentti näyttää sovelluksen etusivun ja painikkeen jolla käyttäjä siirtyy lemmikkinäkymään.
-
+/**
+ * Näyttää kirjautuneen käyttäjän etusivun, pääsyn lemmikkinäkymään
+ * ja mahdollisuuden kirjautua ulos.
+ */
 export default function HomeScreen({ navigation }: Props) {
-  const { user, loading } = useAuth();
+  const { user } = useAuth();
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleLogout = async () => {
+    if (isSigningOut) return;
+
+    setError('');
+    setIsSigningOut(true);
+
+    try {
+      await signOut(auth);
+    } catch {
+      setError('Uloskirjautuminen epäonnistui. Yritä uudelleen.');
+    } finally {
+      setIsSigningOut(false);
+    }
+  };
 
   return (
-    <SafeAreaView style={styles.container}
-        edges={['bottom', 'left', 'right']}>
-        <Text style={styles.title}>Feedlify</Text>
+    <SafeAreaView
+      style={styles.container}
+      edges={['bottom', 'left', 'right']}
+    >
+      <Text style={styles.title}>Feedlify</Text>
 
+      <Text style={styles.description}>
+        Lemmikkiesi ruokinnat yhdessä paikassa.
+      </Text>
+
+      {user && (
         <Text style={styles.description}>
-          Keeping your pets fed on time
+          Kirjautuneena: {user.email}
         </Text>
+      )}
 
-        <Text style={styles.description}>
-          {loading ? 'Loading...' : user ? `Logged in as ${user.email}` : 'Not logged in'}
+      {error !== '' && (
+        <Text accessibilityRole="alert" style={styles.error}>
+          {error}
         </Text>
+      )}
 
+      <View style={styles.buttons}>
         <Button
-          title="Show Pets"
+          title="Näytä lemmikit"
           onPress={() => navigation.navigate('Pets')}
+          disabled={isSigningOut}
         />
 
-        {!loading && !user && (
-            <Button
-                title="Register"
-                onPress={() => navigation.navigate('Register')}
-            />
-        )}
+        <Button
+          title={isSigningOut ? 'Signing out…' : 'Sign Out'}
+          onPress={handleLogout}
+          disabled={isSigningOut}
+        />
+      </View>
     </SafeAreaView>
-    );
+  );
 }
 
 const styles = StyleSheet.create({
@@ -58,5 +92,12 @@ const styles = StyleSheet.create({
     lineHeight: 26,
     color: '#374151',
     marginBottom: 24,
+  },
+  buttons: {
+    gap: 12,
+  },
+  error: {
+    color: '#B91C1C',
+    marginBottom: 16,
   },
 });

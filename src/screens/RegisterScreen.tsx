@@ -56,10 +56,6 @@ export default function RegisterScreen() {
       setPassword('');
       setConfirmPassword('');
 
-      Alert.alert(
-        'Tili luotu',
-        'Rekisteröityminen onnistui. Olet nyt kirjautunut sisään.',
-      );
     } catch (error) { //Virhemääritykset
       if (error instanceof FirebaseError) {
         switch (error.code) {
