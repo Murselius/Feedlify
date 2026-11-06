@@ -44,7 +44,16 @@ service cloud.firestore {
         /databases/$(database)/documents/householdInvites/$(request.resource.data.joinCode)
         ).data.householdId == householdId;
 
-    allow update, delete: if false;
+    // Omistaja saa muuttaa vain nimeä.
+    allow update: if isSignedIn()
+    && resource.data.ownerId == request.auth.uid
+    && request.resource.data.diff(resource.data)
+        .affectedKeys().hasOnly(['name'])
+    && request.resource.data.name is string
+    && request.resource.data.name.size() >= 1
+    && request.resource.data.name.size() <= 80;
+
+    allow delete: if false;
     }
 
     match /householdInvites/{joinCode} {

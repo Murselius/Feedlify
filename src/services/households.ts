@@ -57,6 +57,42 @@ export async function createHousehold(name: string): Promise<string> {
   );
 }
 
+// Päivittää kotitalouden nimen vain kirjautuneen omistajan pyynnöstä.
+export async function renameHousehold(
+  householdId: string,
+  name: string,
+): Promise<void> {
+  const user = auth.currentUser;
+
+  if (!user) {
+    throw new Error('Kirjaudu sisään ennen kotitalouden muokkaamista.');
+  }
+
+  const trimmedName = name.trim();
+
+  if (trimmedName.length === 0 || trimmedName.length > 80) {
+    throw new Error('Kotitalouden nimessä pitää olla 1–80 merkkiä.');
+  }
+
+  const householdRef = doc(db, 'households', householdId);
+
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(householdRef);
+
+    if (!snapshot.exists()) {
+      throw new Error('Kotitaloutta ei enää löydy.');
+    }
+
+    if (snapshot.data().ownerId !== user.uid) {
+      throw new Error('Vain kotitalouden omistaja voi muuttaa nimeä.');
+    }
+
+    transaction.update(householdRef, {
+      name: trimmedName,
+    });
+  });
+}
+
 /**
  * Kuuntelee käyttäjän kotitalouksien muutoksia reaaliaikaisesti.
  * Palauttaa funktion jolla kuuntelu lopetetaan.
