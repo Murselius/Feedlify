@@ -1,4 +1,4 @@
-import { collection, doc, onSnapshot, query, runTransaction, serverTimestamp, where, type FirestoreError, type Unsubscribe, } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, runTransaction, serverTimestamp, where, type FirestoreError, type Unsubscribe, getDocsFromServer, limit, writeBatch, } from 'firebase/firestore';
 import { auth } from './auth';
 import { db } from './firestore';
 import type { Household } from '../types/household';
@@ -65,13 +65,13 @@ export async function renameHousehold(
   const user = auth.currentUser;
 
   if (!user) {
-    throw new Error('Kirjaudu sisään ennen kotitalouden muokkaamista.');
+    throw new Error('Login before editing a household.');
   }
 
   const trimmedName = name.trim();
 
   if (trimmedName.length === 0 || trimmedName.length > 80) {
-    throw new Error('Kotitalouden nimessä pitää olla 1–80 merkkiä.');
+    throw new Error('Household name must be between 1 and 80 characters.');
   }
 
   const householdRef = doc(db, 'households', householdId);
@@ -80,17 +80,90 @@ export async function renameHousehold(
     const snapshot = await transaction.get(householdRef);
 
     if (!snapshot.exists()) {
-      throw new Error('Kotitaloutta ei enää löydy.');
+      throw new Error('Household not found.');
     }
 
     if (snapshot.data().ownerId !== user.uid) {
-      throw new Error('Vain kotitalouden omistaja voi muuttaa nimeä.');
+      throw new Error('Only the household owner can change the name.');
+    }
+
+    if (snapshot.data().isDeleting === true) {
+        throw new Error('The name of a household being deleted cannot be changed.');
     }
 
     transaction.update(householdRef, {
       name: trimmedName,
     });
   });
+}
+
+// Poistaa omistajan kotitalouden lemmikkeineen ja liittymiskoodin varauksineen.
+// Keskeytynyttä poistoa voi jatkaa kutsumalla funktiota uudelleen.
+export async function deleteHousehold(
+  householdId: string,
+): Promise<void> {
+  const user = auth.currentUser;
+
+  if (!user) {
+    throw new Error('Kirjaudu sisään ennen kotitalouden poistamista.');
+  }
+
+  const householdRef = doc(db, 'households', householdId);
+
+  const joinCode = await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(householdRef);
+
+    if (!snapshot.exists()) {
+      throw new Error('Kotitaloutta ei enää löydy.');
+    }
+
+    const household = snapshot.data();
+
+    if (household.ownerId !== user.uid) {
+      throw new Error('Vain kotitalouden omistaja voi poistaa sen.');
+    }
+
+    if (household.isDeleting !== true) {
+      transaction.update(householdRef, {
+        isDeleting: true,
+      });
+    }
+
+    return typeof household.joinCode === 'string'
+      ? household.joinCode
+      : undefined;
+  });
+
+  const petsQuery = query(
+    collection(db, 'pets'),
+    where('householdId', '==', householdId),
+    limit(20),
+  );
+
+  while (true) {
+    // Haetaan palvelimelta, jotta paikallinen välimuisti ei ohita lemmikkejä.
+    const petsSnapshot = await getDocsFromServer(petsQuery);
+
+    if (petsSnapshot.empty) break;
+
+    const batch = writeBatch(db);
+
+    for (const petDocument of petsSnapshot.docs) {
+      batch.delete(petDocument.ref);
+    }
+
+    await batch.commit();
+  }
+
+  const finalBatch = writeBatch(db);
+
+  if (joinCode) {
+    finalBatch.delete(doc(db, 'householdInvites', joinCode));
+  }
+
+  finalBatch.delete(householdRef);
+
+  await finalBatch.commit();
 }
 
 /**

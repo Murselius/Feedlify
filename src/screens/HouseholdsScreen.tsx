@@ -1,13 +1,30 @@
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView,StyleSheet, Text, TextInput, View,} from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FirebaseError } from 'firebase/app';
 import { useAuth } from '../hooks/useAuth';
-import { createHousehold,  renameHousehold, subscribeToHouseholds, } from '../services/households';
+import {
+  createHousehold,
+  deleteHousehold,
+  renameHousehold,
+  subscribeToHouseholds,
+} from '../services/households';
 import type { Household } from '../types/household';
 
-
-//Näyttää käyttäjän kotitaloudet reaaliaikaisesti ja sisältää lomakkeen uuden kotitalouden luomiseen.
+// Näyttää kotitaloudet reaaliaikaisesti ja mahdollistaa luonnin,
+// omistajan tekemän nimen muokkauksen sekä kotitalouden poistamisen.
 export default function HouseholdsScreen() {
   const { user, loading: authLoading } = useAuth();
   const userId = user?.uid;
@@ -19,12 +36,18 @@ export default function HouseholdsScreen() {
   const [loadError, setLoadError] = useState('');
   const [formError, setFormError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
-  const isCreateDisabled = isCreating || !user || !name.trim();
+
   const [editingHousehold, setEditingHousehold] =
-  useState<Household | null>(null);
+    useState<Household | null>(null);
   const [editedName, setEditedName] = useState('');
   const [editError, setEditError] = useState('');
   const [isRenaming, setIsRenaming] = useState(false);
+
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState('');
+  const deletionInProgress = useRef(false);
+
+  const isCreateDisabled = isCreating || !user || !name.trim();
   const isRenameDisabled = isRenaming || !editedName.trim();
 
   useEffect(() => {
@@ -38,7 +61,7 @@ export default function HouseholdsScreen() {
 
     setLoading(true);
 
-    const unsubscribe = subscribeToHouseholds(
+    return subscribeToHouseholds(
       userId,
       (updatedHouseholds) => {
         setHouseholds(updatedHouseholds);
@@ -48,17 +71,14 @@ export default function HouseholdsScreen() {
       (error) => {
         setHouseholds([]);
         setLoading(false);
-        setLoadError(
-          `Households loading failed (${error.code}).`,
-        );
+        setLoadError(`Households loading failed (${error.code}).`);
       },
     );
-
-    return unsubscribe;
   }, [userId]);
 
+  // Luo kotitalouden ja tyhjentää lomakkeen onnistumisen jälkeen.
   const handleCreate = async () => {
-    if (isCreating) return;
+    if (isCreateDisabled) return;
 
     setFormError('');
     setSuccessMessage('');
@@ -71,9 +91,7 @@ export default function HouseholdsScreen() {
       setSuccessMessage('Household created.');
     } catch (error) {
       if (error instanceof FirebaseError) {
-        setFormError(
-          `Household creation failed (${error.code}).`,
-        );
+        setFormError(`Household creation failed (${error.code}).`);
       } else if (error instanceof Error) {
         setFormError(error.message);
       } else {
@@ -85,45 +103,114 @@ export default function HouseholdsScreen() {
   };
 
   // Avaa muokkauksen valitun kotitalouden nykyisellä nimellä.
-const openEdit = (household: Household) => {
-  setEditingHousehold(household);
-  setEditedName(household.name);
-  setEditError('');
-};
+  const openEdit = (household: Household) => {
+    if (
+      household.ownerId !== userId ||
+      household.isDeleting ||
+      deletionInProgress.current
+    ) {
+      return;
+    }
 
-// Sulkee muokkauksen, kun tallennus ei ole kesken.
-const closeEdit = () => {
-  if (isRenaming) return;
+    setEditingHousehold(household);
+    setEditedName(household.name);
+    setEditError('');
+  };
 
-  setEditingHousehold(null);
-  setEditedName('');
-  setEditError('');
-};
-
-// Tallentaa uuden nimen ja sulkee overlayn onnistumisen jälkeen.
-const handleRename = async () => {
-  if (!editingHousehold || isRenaming) return;
-
-  setEditError('');
-  setIsRenaming(true);
-
-  try {
-    await renameHousehold(editingHousehold.id, editedName);
+  // Sulkee muokkauksen, kun tallennus ei ole kesken.
+  const closeEdit = () => {
+    if (isRenaming) return;
 
     setEditingHousehold(null);
     setEditedName('');
-  } catch (error) {
-    if (error instanceof FirebaseError) {
-      setEditError(`Renaming failed (${error.code}).`);
-    } else if (error instanceof Error) {
-      setEditError(error.message);
-    } else {
-      setEditError('An unexpected error occurred. Please try again.');
+    setEditError('');
+  };
+
+  // Tallentaa uuden nimen ja sulkee overlayn onnistumisen jälkeen.
+  const handleRename = async () => {
+    if (!editingHousehold || isRenameDisabled) return;
+
+    setEditError('');
+    setIsRenaming(true);
+
+    try {
+      await renameHousehold(editingHousehold.id, editedName);
+
+      setEditingHousehold(null);
+      setEditedName('');
+    } catch (error) {
+      if (error instanceof FirebaseError) {
+        setEditError(`Renaming failed (${error.code}).`);
+      } else if (error instanceof Error) {
+        setEditError(error.message);
+      } else {
+        setEditError('An unexpected error occurred. Please try again.');
+      }
+    } finally {
+      setIsRenaming(false);
     }
-  } finally {
-    setIsRenaming(false);
-  }
-};
+  };
+
+  // Poistaa kotitalouden ja näyttää virheen, jos poisto ei valmistu.
+  const handleDelete = async (householdId: string) => {
+    if (deletionInProgress.current) return;
+
+    deletionInProgress.current = true;
+    setDeletingId(householdId);
+    setDeleteError('');
+
+    try {
+      await deleteHousehold(householdId);
+    } catch (error) {
+      let message = 'An unexpected error occurred.';
+
+      if (error instanceof FirebaseError) {
+        message = `Deletion failed (${error.code}).`;
+      } else if (error instanceof Error) {
+        message = error.message;
+      }
+
+      setDeleteError(
+        `${message} Please try again. If deletion has started, choose Continue deletion.`,
+      );
+    } finally {
+      deletionInProgress.current = false;
+      setDeletingId(null);
+    }
+  };
+
+  // Pyytää vahvistuksen ennen kotitalouden ja sen lemmikkien poistamista.
+  const confirmDelete = (household: Household) => {
+    if (
+      household.ownerId !== userId ||
+      deletionInProgress.current
+    ) {
+      return;
+    }
+
+    const continuing = household.isDeleting === true;
+
+    Alert.alert(
+      continuing ? 'Continue deletion?' : 'Delete household?',
+      continuing
+        ? `Continue deleting "${household.name}" and its remaining pets? This cannot be undone.`
+        : `Delete "${household.name}" and ALL its pets for every member? This cannot be undone.`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: continuing ? 'Continue deletion' : 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            void handleDelete(household.id);
+          },
+        },
+      ],
+      { cancelable: true },
+    );
+  };
 
   return (
     <SafeAreaView
@@ -140,6 +227,7 @@ const handleRename = async () => {
           <Text style={styles.heading}>Create Household</Text>
 
           <Text style={styles.text}>Household Name</Text>
+
           <TextInput
             style={styles.input}
             accessibilityLabel="Household Name"
@@ -166,22 +254,22 @@ const handleRename = async () => {
             disabled={isCreateDisabled}
             accessibilityRole="button"
             accessibilityState={{
-                disabled: isCreateDisabled,
-                busy: isCreating,
+              disabled: isCreateDisabled,
+              busy: isCreating,
             }}
             style={({ pressed }) => [
-                styles.createButton,
-                isCreateDisabled
+              styles.createButton,
+              isCreateDisabled
                 ? styles.createButtonDisabled
                 : pressed
-                    ? styles.createButtonPressed
-                    : styles.createButtonEnabled,
+                  ? styles.createButtonPressed
+                  : styles.createButtonEnabled,
             ]}
-            >
+          >
             <Text style={styles.createButtonText}>
-                {isCreating ? 'Creating…' : 'Create Household'}
+              {isCreating ? 'Creating…' : 'Create Household'}
             </Text>
-            </Pressable>
+          </Pressable>
         </View>
 
         <Text style={styles.heading}>Your Households</Text>
@@ -205,75 +293,130 @@ const handleRename = async () => {
             </Text>
           )}
 
+        {deleteError !== '' && (
+          <Text accessibilityRole="alert" style={styles.error}>
+            {deleteError}
+          </Text>
+        )}
+
         {households.map((household) => (
-            <View key={household.id} style={styles.card}>
-                <Text style={styles.heading}>{household.name}</Text>
+          <View key={household.id} style={styles.card}>
+            <Text style={styles.heading}>{household.name}</Text>
 
-                <Text style={styles.text}>
-                Members: {household.memberIds.length}
+            <Text style={styles.text}>
+              Members: {household.memberIds.length}
+            </Text>
+
+            {household.ownerId === userId && (
+              <Text style={styles.text}>
+                You are the owner of this household.
+              </Text>
+            )}
+
+            {household.isDeleting ? (
+              <Text style={styles.error}>
+                Deletion has started. This household can no longer be
+                edited or receive new pets.
+              </Text>
+            ) : household.joinCode ? (
+              <View style={styles.joinCodeContainer}>
+                <Text style={styles.text}>Join code</Text>
+
+                <Text selectable style={styles.joinCode}>
+                  {household.joinCode}
                 </Text>
 
-                {household.ownerId === userId && (
                 <Text style={styles.text}>
-                    You are the owner of this household.
+                  Share this code with someone you want to join your
+                  household.
                 </Text>
-                )}
+              </View>
+            ) : (
+              <Text style={styles.text}>
+                This household does not have a join code yet.
+              </Text>
+            )}
 
-                {household.joinCode ? (
-                <View style={styles.joinCodeContainer}>
-                    <Text style={styles.text}>Join code</Text>
-
-                    <Text selectable style={styles.joinCode}>
-                    {household.joinCode}
-                    </Text>
-
-                    <Text style={styles.text}>
-                    Share this code with someone you want to join your household.
-                    </Text>
-                </View>
-                ) : (
-                <Text style={styles.text}>
-                    This household does not have a join code yet.
-                </Text>
-                )}
-                {household.ownerId === userId && (
-                <Pressable
+            {household.ownerId === userId && (
+              <View style={styles.cardActions}>
+                {!household.isDeleting && (
+                  <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={`Edit household ${household.name}`}
+                    accessibilityState={{
+                      disabled: deletingId !== null,
+                    }}
+                    disabled={deletingId !== null}
                     onPress={() => openEdit(household)}
                     style={({ pressed }) => [
-                    styles.createButton,
-                    pressed
-                        ? styles.createButtonPressed
-                        : styles.createButtonEnabled,
+                      styles.createButton,
+                      deletingId !== null
+                        ? styles.createButtonDisabled
+                        : pressed
+                          ? styles.createButtonPressed
+                          : styles.createButtonEnabled,
                     ]}
-                >
+                  >
                     <Text style={styles.createButtonText}>Edit</Text>
-                </Pressable>
+                  </Pressable>
                 )}
-            </View>
-            ))}
+
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    household.isDeleting
+                      ? `Continue deleting household ${household.name}`
+                      : `Delete household ${household.name}`
+                  }
+                  accessibilityState={{
+                    disabled: deletingId !== null,
+                    busy: deletingId === household.id,
+                  }}
+                  disabled={deletingId !== null}
+                  onPress={() => confirmDelete(household)}
+                  style={({ pressed }) => [
+                    styles.createButton,
+                    deletingId !== null
+                      ? styles.createButtonDisabled
+                      : pressed
+                        ? styles.deleteButtonPressed
+                        : styles.deleteButton,
+                  ]}
+                >
+                  <Text style={styles.createButtonText}>
+                    {deletingId === household.id
+                      ? 'Deleting…'
+                      : household.isDeleting
+                        ? 'Continue deletion'
+                        : 'Delete'}
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
+        ))}
       </ScrollView>
+
       <Modal
         visible={editingHousehold !== null}
         transparent
         animationType="fade"
         onRequestClose={closeEdit}
-        >
+      >
         <KeyboardAvoidingView
-            style={styles.modalBackdrop}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalBackdrop}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
-            <ScrollView
+          <ScrollView
             contentContainerStyle={styles.modalContent}
             keyboardShouldPersistTaps="handled"
-            >
+          >
             <View style={styles.modalCard} accessibilityViewIsModal>
-                <Text style={styles.heading}>Edit household</Text>
+              <Text style={styles.heading}>Edit household</Text>
 
-                <Text style={styles.text}>Household name</Text>
+              <Text style={styles.text}>Household name</Text>
 
-                <TextInput
+              <TextInput
                 style={styles.input}
                 accessibilityLabel="Household name"
                 value={editedName}
@@ -281,52 +424,52 @@ const handleRename = async () => {
                 maxLength={80}
                 editable={!isRenaming}
                 autoCapitalize="sentences"
-                />
+              />
 
-                {editError !== '' && (
+              {editError !== '' && (
                 <Text accessibilityRole="alert" style={styles.error}>
-                    {editError}
+                  {editError}
                 </Text>
-                )}
+              )}
 
-                <Pressable
+              <Pressable
                 onPress={handleRename}
                 disabled={isRenameDisabled}
                 accessibilityRole="button"
                 accessibilityState={{
-                    disabled: isRenameDisabled,
-                    busy: isRenaming,
+                  disabled: isRenameDisabled,
+                  busy: isRenaming,
                 }}
                 style={({ pressed }) => [
-                    styles.createButton,
-                    isRenameDisabled
+                  styles.createButton,
+                  isRenameDisabled
                     ? styles.createButtonDisabled
                     : pressed
-                        ? styles.createButtonPressed
-                        : styles.createButtonEnabled,
+                      ? styles.createButtonPressed
+                      : styles.createButtonEnabled,
                 ]}
-                >
+              >
                 <Text style={styles.createButtonText}>
-                    {isRenaming ? 'Saving…' : 'Save'}
+                  {isRenaming ? 'Saving…' : 'Save'}
                 </Text>
-                </Pressable>
+              </Pressable>
 
-                <Pressable
+              <Pressable
                 onPress={closeEdit}
                 disabled={isRenaming}
                 accessibilityRole="button"
                 accessibilityState={{ disabled: isRenaming }}
                 style={({ pressed }) => [
-                    styles.cancelButton,
-                    (pressed || isRenaming) && styles.dimmedButton,
+                  styles.cancelButton,
+                  (pressed || isRenaming) && styles.dimmedButton,
                 ]}
-                >
+              >
                 <Text style={styles.cancelButtonText}>Cancel</Text>
-                </Pressable>
+              </Pressable>
             </View>
-            </ScrollView>
+          </ScrollView>
         </KeyboardAvoidingView>
-        </Modal>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -360,6 +503,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     gap: 12,
   },
+  cardActions: {
+    gap: 12,
+  },
   input: {
     borderWidth: 1,
     borderColor: '#9CA3AF',
@@ -374,71 +520,76 @@ const styles = StyleSheet.create({
   success: {
     color: '#15803D',
   },
-
   createButton: {
-  minHeight: 48,
-  paddingVertical: 14,
-  paddingHorizontal: 20,
-  borderRadius: 8,
-  alignItems: 'center',
-  justifyContent: 'center',
-},
-createButtonEnabled: {
-  backgroundColor: '#2563EB',
-},
-createButtonPressed: {
-  backgroundColor: '#1D4ED8',
-},
-createButtonDisabled: {
-  backgroundColor: '#6B7280',
-},
-createButtonText: {
-  color: '#FFFFFF',
-  fontSize: 16,
-  fontWeight: '600',
-},
-joinCodeContainer: {
-  gap: 8,
-},
-joinCode: {
-  fontSize: 22,
-  fontWeight: '700',
-  letterSpacing: 2,
-  color: '#2563EB',
-},
-modalBackdrop: {
-  flex: 1,
-  backgroundColor: 'rgba(0, 0, 0, 0.5)',
-},
-modalContent: {
-  flexGrow: 1,
-  justifyContent: 'center',
-  padding: 24,
-},
-modalCard: {
-  width: '100%',
-  maxWidth: 480,
-  alignSelf: 'center',
-  backgroundColor: '#FFFFFF',
-  borderRadius: 16,
-  padding: 24,
-  gap: 16,
-},
-cancelButton: {
-  minHeight: 48,
-  padding: 14,
-  borderRadius: 8,
-  borderWidth: 1,
-  borderColor: '#9CA3AF',
-  alignItems: 'center',
-  justifyContent: 'center',
-},
-cancelButtonText: {
-  color: '#374151',
-  fontSize: 16,
-  fontWeight: '600',
-},
-dimmedButton: {
-  opacity: 0.5,
-},
+    minHeight: 48,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  createButtonEnabled: {
+    backgroundColor: '#2563EB',
+  },
+  createButtonPressed: {
+    backgroundColor: '#1D4ED8',
+  },
+  createButtonDisabled: {
+    backgroundColor: '#6B7280',
+  },
+  createButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  deleteButton: {
+    backgroundColor: '#B91C1C',
+  },
+  deleteButtonPressed: {
+    backgroundColor: '#991B1B',
+  },
+  joinCodeContainer: {
+    gap: 8,
+  },
+  joinCode: {
+    fontSize: 22,
+    fontWeight: '700',
+    letterSpacing: 2,
+    color: '#2563EB',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 480,
+    alignSelf: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 24,
+    gap: 16,
+  },
+  cancelButton: {
+    minHeight: 48,
+    padding: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#9CA3AF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelButtonText: {
+    color: '#374151',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  dimmedButton: {
+    opacity: 0.5,
+  },
 });

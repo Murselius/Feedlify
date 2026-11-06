@@ -15,6 +15,24 @@ service cloud.firestore {
             .data.memberIds;
     }
 
+    // Tarkistaa, että pyynnön tekijä omistaa poistettavan kotitalouden.
+    function ownsDeletingHousehold(householdId) {
+    let household = get(
+        /databases/$(database)/documents/households/$(householdId)
+    ).data;
+
+    return isSignedIn()
+        && household.ownerId == request.auth.uid
+        && household.get('isDeleting', false) == true;
+    }
+
+    // Tarkistaa kotitalouden poistotilan myös saman kirjoituksen muutosten jälkeen.
+    function isHouseholdActiveAfter(householdId) {
+    return getAfter(
+        /databases/$(database)/documents/households/$(householdId)
+    ).data.get('isDeleting', false) == false;
+    }
+
    match /households/{householdId} {
     allow read: if isSignedIn()
         && request.auth.uid in resource.data.memberIds;
@@ -44,16 +62,37 @@ service cloud.firestore {
         /databases/$(database)/documents/householdInvites/$(request.resource.data.joinCode)
         ).data.householdId == householdId;
 
-    // Omistaja saa muuttaa vain nimeä.
-    allow update: if isSignedIn()
-    && resource.data.ownerId == request.auth.uid
-    && request.resource.data.diff(resource.data)
-        .affectedKeys().hasOnly(['name'])
-    && request.resource.data.name is string
-    && request.resource.data.name.size() >= 1
-    && request.resource.data.name.size() <= 80;
+        // Omistaja voi joko muuttaa nimeä tai käynnistää poiston.
+        // Poistotilaa ei voi perua eikä muita kenttiä muuttaa.
+        allow update: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid
+        && resource.data.get('isDeleting', false) == false
+        && (
+            (
+            request.resource.data.diff(resource.data)
+                .affectedKeys().hasOnly(['name'])
+            && request.resource.data.name is string
+            && request.resource.data.name.size() >= 1
+            && request.resource.data.name.size() <= 80
+            )
+            ||
+            (
+            request.resource.data.diff(resource.data)
+                .affectedKeys().hasOnly(['isDeleting'])
+            && request.resource.data.isDeleting == true
+            )
+        );
 
-    allow delete: if false;
+        // Kotitalouden mahdollinen koodivaraus poistetaan samalla.
+        allow delete: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid
+        && resource.data.get('isDeleting', false) == true
+        && (
+            !('joinCode' in resource.data)
+            || !existsAfter(
+            /databases/$(database)/documents/householdInvites/$(resource.data.joinCode)
+            )
+        );
     }
 
     match /householdInvites/{joinCode} {
@@ -77,7 +116,13 @@ service cloud.firestore {
         /databases/$(database)/documents/households/$(request.resource.data.householdId)
         ).data.joinCode == joinCode;
 
-    allow update, delete: if false;
+    allow update: if false;
+
+    // Varauksen voi poistaa vain omistaja kotitalouden lopullisen poiston yhteydessä.
+    allow delete: if ownsDeletingHousehold(resource.data.householdId)
+    && !existsAfter(
+        /databases/$(database)/documents/households/$(resource.data.householdId)
+    );
     }
 
     match /pets/{petId} {
@@ -101,13 +146,17 @@ service cloud.firestore {
         && request.resource.data.species.size() <= 40
         && request.resource.data.householdId is string
         && isHouseholdMember(request.resource.data.householdId)
+        && isHouseholdActiveAfter(request.resource.data.householdId)
         && request.resource.data.feedingsPerDay is int
         && request.resource.data.feedingsPerDay >= 1
         && request.resource.data.feedingsPerDay <= 24
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.createdAt == request.time;
 
-      allow update, delete: if false;
+      allow update: if false;
+
+      // Omistaja voi poistaa lemmikit osana kotitalouden poistamista.
+      allow delete: if ownsDeletingHousehold(resource.data.householdId);
     }
 
     match /{document=**} {

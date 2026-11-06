@@ -8,4 +8,5 @@ export type Household = {
   memberIds: string[];
   createdAt: Timestamp | null;
   joinCode?: string;
+  isDeleting?: boolean;
 };
