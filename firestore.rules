@@ -11,39 +11,101 @@ service cloud.firestore {
     function isHouseholdMember(householdId) {
       return isSignedIn()
         && request.auth.uid in
-          get(/databases/$(database)/documents/households/$(householdId))
-            .data.memberIds;
+          get(
+            /databases/$(database)/documents/households/$(householdId)
+          ).data.memberIds;
     }
 
     // Tarkistaa, että pyynnön tekijä omistaa poistettavan kotitalouden.
     function ownsDeletingHousehold(householdId) {
-    let household = get(
+      let household = get(
         /databases/$(database)/documents/households/$(householdId)
-    ).data;
+      ).data;
 
-    return isSignedIn()
+      return isSignedIn()
         && household.ownerId == request.auth.uid
         && household.get('isDeleting', false) == true;
     }
 
-    // Tarkistaa kotitalouden poistotilan myös saman kirjoituksen muutosten jälkeen.
+    // Tarkistaa poistotilan myös saman kirjoituksen muutosten jälkeen.
     function isHouseholdActiveAfter(householdId) {
-    return getAfter(
+      return getAfter(
         /databases/$(database)/documents/households/$(householdId)
-    ).data.get('isDeleting', false) == false;
+      ).data.get('isDeleting', false) == false;
     }
 
-   match /households/{householdId} {
-    allow read: if isSignedIn()
+    match /households/{householdId} {
+
+      // Sallii omistajan vaihtaa vain kotitalouden nimen.
+      function isOwnerRename() {
+        return resource.data.ownerId == request.auth.uid
+          && request.resource.data.diff(resource.data)
+            .affectedKeys().hasOnly(['name'])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() >= 1
+          && request.resource.data.name.size() <= 80;
+      }
+
+      // Sallii omistajan käynnistää poiston muuttamatta muita tietoja.
+      function isOwnerStartingDeletion() {
+        return resource.data.ownerId == request.auth.uid
+          && request.resource.data.diff(resource.data)
+            .affectedKeys().hasOnly(['isDeleting'])
+          && request.resource.data.isDeleting == true;
+      }
+
+      // Tarkistaa käyttäjän toimittaman koodin ja liittymispyynnön rakenteen.
+      function hasValidJoinRequest() {
+        return 'joinCode' in resource.data
+          && resource.data.joinCode is string
+          && 'lastJoinRequest' in request.resource.data
+          && request.resource.data.lastJoinRequest is map
+          && request.resource.data.lastJoinRequest.keys().hasAll([
+            'userId', 'code'
+          ])
+          && request.resource.data.lastJoinRequest.keys().hasOnly([
+            'userId', 'code'
+          ])
+          && request.resource.data.lastJoinRequest.userId
+            == request.auth.uid
+          && request.resource.data.lastJoinRequest.code is string
+          && request.resource.data.lastJoinRequest.code
+            == resource.data.joinCode;
+      }
+
+      // Sallii vain oman jäsenyyden lisäämisen säilyttäen nykyiset jäsenet.
+      // Uudelleen liittyminen ei lisää samaa käyttäjää toista kertaa.
+      function isJoiningWithCode() {
+        return request.resource.data.diff(resource.data)
+            .affectedKeys().hasOnly(['memberIds', 'lastJoinRequest'])
+          && hasValidJoinRequest()
+          && request.resource.data.memberIds is list
+          && (
+            (
+              !(request.auth.uid in resource.data.memberIds)
+              && request.resource.data.memberIds
+                == resource.data.memberIds.concat([request.auth.uid])
+            )
+            ||
+            (
+              request.auth.uid in resource.data.memberIds
+              && request.resource.data.memberIds
+                == resource.data.memberIds
+            )
+          );
+      }
+
+      // Kotitalouden tiedot näkyvät vain sen jäsenille.
+      allow read: if isSignedIn()
         && request.auth.uid in resource.data.memberIds;
 
-    // Kotitalous ja sen koodivaraus on luotava yhdessä.
-    allow create: if isSignedIn()
+      // Kotitalous ja sen koodivaraus on luotava yhdessä.
+      allow create: if isSignedIn()
         && request.resource.data.keys().hasAll([
-        'name', 'ownerId', 'memberIds', 'joinCode', 'createdAt'
+          'name', 'ownerId', 'memberIds', 'joinCode', 'createdAt'
         ])
         && request.resource.data.keys().hasOnly([
-        'name', 'ownerId', 'memberIds', 'joinCode', 'createdAt'
+          'name', 'ownerId', 'memberIds', 'joinCode', 'createdAt'
         ])
         && request.resource.data.name is string
         && request.resource.data.name.size() >= 1
@@ -53,82 +115,76 @@ service cloud.firestore {
         && request.resource.data.createdAt == request.time
         && request.resource.data.joinCode is string
         && request.resource.data.joinCode.matches(
-        '^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{12}$'
+          '^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{12}$'
         )
         && !exists(
-        /databases/$(database)/documents/householdInvites/$(request.resource.data.joinCode)
+          /databases/$(database)/documents/householdInvites/$(request.resource.data.joinCode)
         )
         && getAfter(
-        /databases/$(database)/documents/householdInvites/$(request.resource.data.joinCode)
+          /databases/$(database)/documents/householdInvites/$(request.resource.data.joinCode)
         ).data.householdId == householdId;
 
-        // Omistaja voi joko muuttaa nimeä tai käynnistää poiston.
-        // Poistotilaa ei voi perua eikä muita kenttiä muuttaa.
-        allow update: if isSignedIn()
-        && resource.data.ownerId == request.auth.uid
+      // Aktiivisessa kotitaloudessa sallitaan nimen muokkaus,
+      // poiston käynnistys tai omaksi jäseneksi liittyminen koodilla.
+      allow update: if isSignedIn()
         && resource.data.get('isDeleting', false) == false
         && (
-            (
-            request.resource.data.diff(resource.data)
-                .affectedKeys().hasOnly(['name'])
-            && request.resource.data.name is string
-            && request.resource.data.name.size() >= 1
-            && request.resource.data.name.size() <= 80
-            )
-            ||
-            (
-            request.resource.data.diff(resource.data)
-                .affectedKeys().hasOnly(['isDeleting'])
-            && request.resource.data.isDeleting == true
-            )
+          isOwnerRename()
+          || isOwnerStartingDeletion()
+          || isJoiningWithCode()
         );
 
-        // Kotitalouden mahdollinen koodivaraus poistetaan samalla.
-        allow delete: if isSignedIn()
+      // Kotitalouden mahdollinen koodivaraus poistetaan samalla.
+      allow delete: if isSignedIn()
         && resource.data.ownerId == request.auth.uid
         && resource.data.get('isDeleting', false) == true
         && (
-            !('joinCode' in resource.data)
-            || !existsAfter(
+          !('joinCode' in resource.data)
+          || !existsAfter(
             /databases/$(database)/documents/householdInvites/$(resource.data.joinCode)
-            )
+          )
         );
     }
 
     match /householdInvites/{joinCode} {
-    // Kirjautunut käyttäjä voi tarkistaa yksittäisen koodin.
-    allow get: if isSignedIn();
-    allow list: if false;
 
-    // Koodivaraus saa osoittaa vain samalla kertaa luotavaan omaan kotitalouteen.
-    allow create: if isSignedIn()
+      // Kirjautunut käyttäjä voi tarkistaa yksittäisen koodin.
+      allow get: if isSignedIn();
+
+      // Kaikkien liittymiskoodien listaaminen on estetty.
+      allow list: if false;
+
+      // Koodivaraus saa osoittaa vain samalla kertaa luotavaan omaan kotitalouteen.
+      allow create: if isSignedIn()
         && joinCode.matches('^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{12}$')
         && request.resource.data.keys().hasAll(['householdId'])
         && request.resource.data.keys().hasOnly(['householdId'])
         && request.resource.data.householdId is string
         && !exists(
-        /databases/$(database)/documents/households/$(request.resource.data.householdId)
+          /databases/$(database)/documents/households/$(request.resource.data.householdId)
         )
         && getAfter(
-        /databases/$(database)/documents/households/$(request.resource.data.householdId)
+          /databases/$(database)/documents/households/$(request.resource.data.householdId)
         ).data.ownerId == request.auth.uid
         && getAfter(
-        /databases/$(database)/documents/households/$(request.resource.data.householdId)
+          /databases/$(database)/documents/households/$(request.resource.data.householdId)
         ).data.joinCode == joinCode;
 
-    allow update: if false;
+      allow update: if false;
 
-    // Varauksen voi poistaa vain omistaja kotitalouden lopullisen poiston yhteydessä.
-    allow delete: if ownsDeletingHousehold(resource.data.householdId)
-    && !existsAfter(
-        /databases/$(database)/documents/households/$(resource.data.householdId)
-    );
+      // Varauksen voi poistaa vain omistaja kotitalouden lopullisen poiston yhteydessä.
+      allow delete: if ownsDeletingHousehold(resource.data.householdId)
+        && !existsAfter(
+          /databases/$(database)/documents/households/$(resource.data.householdId)
+        );
     }
 
     match /pets/{petId} {
+
       // Vain lemmikin kotitalouden jäsen voi lukea tiedot.
       allow read: if isHouseholdMember(resource.data.householdId);
 
+      // Jäsen voi luoda lemmikin vain aktiiviseen kotitalouteen.
       allow create: if isSignedIn()
         && request.resource.data.keys().hasAll([
           'name', 'species', 'householdId',
@@ -159,6 +215,7 @@ service cloud.firestore {
       allow delete: if ownsDeletingHousehold(resource.data.householdId);
     }
 
+    // Muut tietokannan operaatiot on oletuksena estetty.
     match /{document=**} {
       allow read, write: if false;
     }

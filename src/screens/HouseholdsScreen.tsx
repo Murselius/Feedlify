@@ -1,30 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FirebaseError } from 'firebase/app';
 import { useAuth } from '../hooks/useAuth';
-import {
-  createHousehold,
-  deleteHousehold,
-  renameHousehold,
-  subscribeToHouseholds,
-} from '../services/households';
+import { createHousehold, deleteHousehold, joinHousehold, renameHousehold, subscribeToHouseholds, } from '../services/households';
 import type { Household } from '../types/household';
 
-// Näyttää kotitaloudet reaaliaikaisesti ja mahdollistaa luonnin,
-// omistajan tekemän nimen muokkauksen sekä kotitalouden poistamisen.
+// Näyttää kotitaloudet reaaliaikaisesti ja mahdollistaa luonnin, koodilla
+// liittymisen sekä omistajan tekemän nimen muokkauksen ja poistamisen.
 export default function HouseholdsScreen() {
   const { user, loading: authLoading } = useAuth();
   const userId = user?.uid;
@@ -37,6 +20,12 @@ export default function HouseholdsScreen() {
   const [formError, setFormError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
+  const [joinCode, setJoinCode] = useState('');
+  const [joinError, setJoinError] = useState('');
+  const [joinSuccess, setJoinSuccess] = useState('');
+  const [isJoining, setIsJoining] = useState(false);
+  const joiningInProgress = useRef(false);
+
   const [editingHousehold, setEditingHousehold] =
     useState<Household | null>(null);
   const [editedName, setEditedName] = useState('');
@@ -48,6 +37,7 @@ export default function HouseholdsScreen() {
   const deletionInProgress = useRef(false);
 
   const isCreateDisabled = isCreating || !user || !name.trim();
+  const isJoinDisabled = isJoining || !user || !joinCode.trim();
   const isRenameDisabled = isRenaming || !editedName.trim();
 
   useEffect(() => {
@@ -99,6 +89,50 @@ export default function HouseholdsScreen() {
       }
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  // Liittää kirjautuneen käyttäjän kotitalouteen annetulla koodilla.
+  const handleJoin = async () => {
+    if (joiningInProgress.current || isJoinDisabled) return;
+
+    joiningInProgress.current = true;
+    setIsJoining(true);
+    setJoinError('');
+    setJoinSuccess('');
+
+    try {
+      await joinHousehold(joinCode);
+
+      setJoinCode('');
+      setJoinSuccess('You are a member of this household.');
+    } catch (error) {
+      if (error instanceof FirebaseError) {
+        switch (error.code) {
+          case 'permission-denied':
+            setJoinError(
+              'Joining is not allowed. The household may be pending deletion.',
+            );
+            break;
+          case 'not-found':
+            setJoinError('The household no longer exists.');
+            break;
+          case 'unavailable':
+            setJoinError(
+              'Could not connect. Check your connection and try again.',
+            );
+            break;
+          default:
+            setJoinError(`Joining failed (${error.code}).`);
+        }
+      } else if (error instanceof Error) {
+        setJoinError(error.message);
+      } else {
+        setJoinError('An unexpected error occurred. Please try again.');
+      }
+    } finally {
+      joiningInProgress.current = false;
+      setIsJoining(false);
     }
   };
 
@@ -268,6 +302,58 @@ export default function HouseholdsScreen() {
           >
             <Text style={styles.createButtonText}>
               {isCreating ? 'Creating…' : 'Create Household'}
+            </Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.heading}>Join Household</Text>
+
+          <Text style={styles.text}>
+            Enter the join code shared by a household member.
+          </Text>
+
+          <TextInput
+            style={styles.input}
+            accessibilityLabel="Household join code"
+            placeholder="Enter the 12-character code"
+            placeholderTextColor="#6B7280"
+            value={joinCode}
+            onChangeText={setJoinCode}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            editable={!isJoining}
+          />
+
+          {joinError !== '' && (
+            <Text accessibilityRole="alert" style={styles.error}>
+              {joinError}
+            </Text>
+          )}
+
+          {joinSuccess !== '' && (
+            <Text style={styles.success}>{joinSuccess}</Text>
+          )}
+
+          <Pressable
+            onPress={handleJoin}
+            disabled={isJoinDisabled}
+            accessibilityRole="button"
+            accessibilityState={{
+              disabled: isJoinDisabled,
+              busy: isJoining,
+            }}
+            style={({ pressed }) => [
+              styles.createButton,
+              isJoinDisabled
+                ? styles.createButtonDisabled
+                : pressed
+                  ? styles.createButtonPressed
+                  : styles.createButtonEnabled,
+            ]}
+          >
+            <Text style={styles.createButtonText}>
+              {isJoining ? 'Joining…' : 'Join Household'}
             </Text>
           </Pressable>
         </View>

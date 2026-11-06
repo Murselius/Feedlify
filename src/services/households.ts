@@ -1,8 +1,8 @@
-import { collection, doc, onSnapshot, query, runTransaction, serverTimestamp, where, type FirestoreError, type Unsubscribe, getDocsFromServer, limit, writeBatch, } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, runTransaction, serverTimestamp, where, type FirestoreError, type Unsubscribe, getDocsFromServer, limit, writeBatch, arrayUnion, getDocFromServer, updateDoc, } from 'firebase/firestore';
 import { auth } from './auth';
 import { db } from './firestore';
 import type { Household } from '../types/household';
-import { generateJoinCode } from '../utils/joinCode';
+import { generateJoinCode, normalizeJoinCode } from '../utils/joinCode';
 
 // Luo kotitalouden jonka omistajaksi ja ensimmäiseksi jäseneksi asetetaan kirjautunut käyttäjä.
 // Luo kotitalouden ja varaa sille yksilöllisen liittymiskoodin atomisesti.
@@ -164,6 +164,49 @@ export async function deleteHousehold(
   finalBatch.delete(householdRef);
 
   await finalBatch.commit();
+}
+
+// Etsii liittymiskoodin ja pyytää kirjautuneen käyttäjän lisäämistä jäseneksi.
+// Firestore-säännöt tarkistavat koodin, jäsenmuutoksen ja kotitalouden poistotilan.
+export async function joinHousehold(
+  inputCode: string,
+): Promise<string> {
+  const user = auth.currentUser;
+
+  if (!user) {
+    throw new Error('Kirjaudu sisään ennen kotitalouteen liittymistä.');
+  }
+
+  const code = normalizeJoinCode(inputCode);
+
+  if (!/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{12}$/.test(code)) {
+    throw new Error('Tarkista liittymiskoodi. Koodissa on 12 merkkiä.');
+  }
+
+  const inviteRef = doc(db, 'householdInvites', code);
+  const inviteSnapshot = await getDocFromServer(inviteRef);
+
+  if (!inviteSnapshot.exists()) {
+    throw new Error('Liittymiskoodia ei löytynyt.');
+  }
+
+  const householdId = inviteSnapshot.data().householdId;
+
+  if (typeof householdId !== 'string' || !householdId) {
+    throw new Error('Liittymiskoodin tiedot ovat virheelliset.');
+  }
+
+  const householdRef = doc(db, 'households', householdId);
+
+  await updateDoc(householdRef, {
+    memberIds: arrayUnion(user.uid),
+    lastJoinRequest: {
+      userId: user.uid,
+      code,
+    },
+  });
+
+  return householdId;
 }
 
 /**
