@@ -7,6 +7,7 @@ import HomeScreen from '../screens/HomeScreen';
 import PetsScreen from '../screens/PetsScreen';
 import LoginScreen from '../screens/LoginScreen';
 import RegisterScreen from '../screens/RegisterScreen';
+import HouseholdsScreen from '../screens/HouseholdsScreen';
 import type { RootStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -44,14 +45,20 @@ export default function RootNavigator() {
             component={PetsScreen}
             options={{ title: 'Your pets' }}
           />
+
+          <Stack.Screen
+            name="Households"
+            component={HouseholdsScreen}
+            options={{ title: 'Your Households' }}
+           />
         </Stack.Group>
       ) : (
         <Stack.Group navigationKey="guest">
           <Stack.Screen
             name="Login"
             component={LoginScreen}
-            options={{ title: 'Login' }}
-          />
+            options={{ title: 'Sign In' }}
+            />
 
           <Stack.Screen
             name="Register"

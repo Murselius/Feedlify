@@ -4,4 +4,5 @@ export type RootStackParamList = {
   Pets: undefined;
   Register: undefined;
   Login: undefined;
+  Households: undefined;
 };

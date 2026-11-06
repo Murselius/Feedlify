@@ -59,8 +59,14 @@ export default function HomeScreen({ navigation }: Props) {
 
       <View style={styles.buttons}>
         <Button
-          title="Näytä lemmikit"
+          title="Show Pets"
           onPress={() => navigation.navigate('Pets')}
+          disabled={isSigningOut}
+        />
+
+        <Button
+          title="Households"
+          onPress={() => navigation.navigate('Households')}
           disabled={isSigningOut}
         />
 
