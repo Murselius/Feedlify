@@ -7,4 +7,5 @@ export type Household = {
   ownerId: string;
   memberIds: string[];
   createdAt: Timestamp | null;
+  joinCode?: string;
 };

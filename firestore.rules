@@ -15,25 +15,60 @@ service cloud.firestore {
             .data.memberIds;
     }
 
-    match /households/{householdId} {
-      allow read: if isSignedIn()
+   match /households/{householdId} {
+    allow read: if isSignedIn()
         && request.auth.uid in resource.data.memberIds;
 
-      allow create: if isSignedIn()
+    // Kotitalous ja sen koodivaraus on luotava yhdessä.
+    allow create: if isSignedIn()
         && request.resource.data.keys().hasAll([
-          'name', 'ownerId', 'memberIds', 'createdAt'
+        'name', 'ownerId', 'memberIds', 'joinCode', 'createdAt'
         ])
         && request.resource.data.keys().hasOnly([
-          'name', 'ownerId', 'memberIds', 'createdAt'
+        'name', 'ownerId', 'memberIds', 'joinCode', 'createdAt'
         ])
         && request.resource.data.name is string
         && request.resource.data.name.size() >= 1
         && request.resource.data.name.size() <= 80
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.memberIds == [request.auth.uid]
-        && request.resource.data.createdAt == request.time;
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.joinCode is string
+        && request.resource.data.joinCode.matches(
+        '^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{12}$'
+        )
+        && !exists(
+        /databases/$(database)/documents/householdInvites/$(request.resource.data.joinCode)
+        )
+        && getAfter(
+        /databases/$(database)/documents/householdInvites/$(request.resource.data.joinCode)
+        ).data.householdId == householdId;
 
-      allow update, delete: if false;
+    allow update, delete: if false;
+    }
+
+    match /householdInvites/{joinCode} {
+    // Kirjautunut käyttäjä voi tarkistaa yksittäisen koodin.
+    allow get: if isSignedIn();
+    allow list: if false;
+
+    // Koodivaraus saa osoittaa vain samalla kertaa luotavaan omaan kotitalouteen.
+    allow create: if isSignedIn()
+        && joinCode.matches('^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{12}$')
+        && request.resource.data.keys().hasAll(['householdId'])
+        && request.resource.data.keys().hasOnly(['householdId'])
+        && request.resource.data.householdId is string
+        && !exists(
+        /databases/$(database)/documents/households/$(request.resource.data.householdId)
+        )
+        && getAfter(
+        /databases/$(database)/documents/households/$(request.resource.data.householdId)
+        ).data.ownerId == request.auth.uid
+        && getAfter(
+        /databases/$(database)/documents/households/$(request.resource.data.householdId)
+        ).data.joinCode == joinCode;
+
+    allow update, delete: if false;
     }
 
     match /pets/{petId} {
