@@ -215,6 +215,37 @@ service cloud.firestore {
       allow delete: if ownsDeletingHousehold(resource.data.householdId);
     }
 
+    match /feedings/{feedingId} {
+
+    // Kotitalouden jäsenet voivat lukea sen ruokintakirjaukset.
+    allow read: if isHouseholdMember(resource.data.householdId);
+
+    // Jäsen voi kirjata ruokinnan olemassa olevalle, saman kotitalouden lemmikille.
+    allow create: if isSignedIn()
+        && request.resource.data.keys().hasAll([
+        'petId', 'householdId', 'fedBy', 'fedAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+        'petId', 'householdId', 'fedBy', 'fedAt'
+        ])
+        && request.resource.data.petId is string
+        && request.resource.data.petId.size() > 0
+        && request.resource.data.householdId is string
+        && request.resource.data.householdId.size() > 0
+        && request.resource.data.fedBy == request.auth.uid
+        && request.resource.data.fedAt == request.time
+        && isHouseholdMember(request.resource.data.householdId)
+        && isHouseholdActiveAfter(request.resource.data.householdId)
+        && getAfter(
+        /databases/$(database)/documents/pets/$(request.resource.data.petId)
+        ).data.householdId == request.resource.data.householdId;
+
+    allow update: if false;
+
+    // Omistaja voi poistaa kirjaukset kotitalouden poistamisen yhteydessä.
+    allow delete: if ownsDeletingHousehold(resource.data.householdId);
+    }
+
     // Muut tietokannan operaatiot on oletuksena estetty.
     match /{document=**} {
       allow read, write: if false;

@@ -97,8 +97,8 @@ export async function renameHousehold(
   });
 }
 
-// Poistaa omistajan kotitalouden lemmikkeineen ja liittymiskoodin varauksineen.
-// Keskeytynyttä poistoa voi jatkaa kutsumalla funktiota uudelleen.
+// Poistaa omistajan kotitalouden ruokintahistorioineen, lemmikkeineen
+// ja liittymiskoodin varauksineen. Keskeytynyttä poistoa voi jatkaa.
 export async function deleteHousehold(
   householdId: string,
 ): Promise<void> {
@@ -133,6 +133,27 @@ export async function deleteHousehold(
       ? household.joinCode
       : undefined;
   });
+
+  // Poistetaan ruokintahistoria ennen lemmikkejä.
+    const feedingsQuery = query(
+    collection(db, 'feedings'),
+    where('householdId', '==', householdId),
+    limit(20),
+    );
+
+    while (true) {
+    const feedingsSnapshot = await getDocsFromServer(feedingsQuery);
+
+    if (feedingsSnapshot.empty) break;
+
+    const batch = writeBatch(db);
+
+    for (const feedingDocument of feedingsSnapshot.docs) {
+        batch.delete(feedingDocument.ref);
+    }
+
+    await batch.commit();
+    }
 
   const petsQuery = query(
     collection(db, 'pets'),
