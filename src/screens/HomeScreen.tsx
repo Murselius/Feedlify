@@ -28,7 +28,7 @@ export default function HomeScreen({ navigation }: Props) {
     try {
       await signOut(auth);
     } catch {
-      setError('Uloskirjautuminen epäonnistui. Yritä uudelleen.');
+      setError('Sign out failed.');
     } finally {
       setIsSigningOut(false);
     }
@@ -42,12 +42,12 @@ export default function HomeScreen({ navigation }: Props) {
       <Text style={styles.title}>Feedlify</Text>
 
       <Text style={styles.description}>
-        Lemmikkiesi ruokinnat yhdessä paikassa.
+        Keep your pets fed.
       </Text>
 
       {user && (
         <Text style={styles.description}>
-          Kirjautuneena: {user.email}
+          Signed in as: {user.email}
         </Text>
       )}
 
