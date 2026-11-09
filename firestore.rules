@@ -10,10 +10,17 @@ service cloud.firestore {
     // Tarkistaa jäsenyyden kotitalouden dokumentista.
     function isHouseholdMember(householdId) {
       return isSignedIn()
-        && request.auth.uid in
-          get(
-            /databases/$(database)/documents/households/$(householdId)
-          ).data.memberIds;
+        && request.auth.uid in get(
+          /databases/$(database)/documents/households/$(householdId)
+        ).data.memberIds;
+    }
+
+    // Tarkistaa omistajuuden kotitalouden ownerId-kentästä.
+    function isHouseholdOwner(householdId) {
+      return isSignedIn()
+        && get(
+          /databases/$(database)/documents/households/$(householdId)
+        ).data.ownerId == request.auth.uid;
     }
 
     // Tarkistaa, että pyynnön tekijä omistaa poistettavan kotitalouden.
@@ -27,11 +34,32 @@ service cloud.firestore {
         && household.get('isDeleting', false) == true;
     }
 
-    // Tarkistaa poistotilan myös saman kirjoituksen muutosten jälkeen.
+    // Tarkistaa kotitalouden poistotilan kirjoituksen jälkeen.
     function isHouseholdActiveAfter(householdId) {
       return getAfter(
         /databases/$(database)/documents/households/$(householdId)
       ).data.get('isDeleting', false) == false;
+    }
+
+    // Ruokinnan voi kirjata vain saman kotitalouden aktiiviselle lemmikille.
+    function isActivePetAfter(petId, householdId) {
+      let pet = getAfter(
+        /databases/$(database)/documents/pets/$(petId)
+      ).data;
+
+      return pet.householdId == householdId
+        && pet.get('isDeleting', false) == false;
+    }
+
+    // Omistaja voi tyhjentää yksittäisen lemmikin historian poiston alettua.
+    function canDeletePetFeeding(petId, householdId) {
+      let pet = get(
+        /databases/$(database)/documents/pets/$(petId)
+      ).data;
+
+      return isHouseholdOwner(householdId)
+        && pet.householdId == householdId
+        && pet.get('isDeleting', false) == true;
     }
 
     match /households/{householdId} {
@@ -73,7 +101,7 @@ service cloud.firestore {
             == resource.data.joinCode;
       }
 
-      // Sallii vain oman jäsenyyden lisäämisen säilyttäen nykyiset jäsenet.
+      // Sallii oman jäsenyyden lisäämisen säilyttäen nykyiset jäsenet.
       // Uudelleen liittyminen ei lisää samaa käyttäjää toista kertaa.
       function isJoiningWithCode() {
         return request.resource.data.diff(resource.data)
@@ -95,11 +123,10 @@ service cloud.firestore {
           );
       }
 
-      // Kotitalouden tiedot näkyvät vain sen jäsenille.
       allow read: if isSignedIn()
         && request.auth.uid in resource.data.memberIds;
 
-      // Kotitalous ja sen koodivaraus on luotava yhdessä.
+      // Kotitalous ja sen koodivaraus luodaan yhdessä.
       allow create: if isSignedIn()
         && request.resource.data.keys().hasAll([
           'name', 'ownerId', 'memberIds', 'joinCode', 'createdAt'
@@ -124,8 +151,6 @@ service cloud.firestore {
           /databases/$(database)/documents/householdInvites/$(request.resource.data.joinCode)
         ).data.householdId == householdId;
 
-      // Aktiivisessa kotitaloudessa sallitaan nimen muokkaus,
-      // poiston käynnistys tai omaksi jäseneksi liittyminen koodilla.
       allow update: if isSignedIn()
         && resource.data.get('isDeleting', false) == false
         && (
@@ -150,8 +175,6 @@ service cloud.firestore {
 
       // Kirjautunut käyttäjä voi tarkistaa yksittäisen koodin.
       allow get: if isSignedIn();
-
-      // Kaikkien liittymiskoodien listaaminen on estetty.
       allow list: if false;
 
       // Koodivaraus saa osoittaa vain samalla kertaa luotavaan omaan kotitalouteen.
@@ -172,7 +195,6 @@ service cloud.firestore {
 
       allow update: if false;
 
-      // Varauksen voi poistaa vain omistaja kotitalouden lopullisen poiston yhteydessä.
       allow delete: if ownsDeletingHousehold(resource.data.householdId)
         && !existsAfter(
           /databases/$(database)/documents/households/$(resource.data.householdId)
@@ -181,10 +203,45 @@ service cloud.firestore {
 
     match /pets/{petId} {
 
-      // Vain lemmikin kotitalouden jäsen voi lukea tiedot.
+      // Jäsen voi muokata lemmikin nimeä, lajia ja ruokintatavoitetta.
+      function isPetDetailsUpdate() {
+        let data = request.resource.data;
+        let changed = data.diff(resource.data).affectedKeys();
+
+        return changed.hasOnly(['name', 'species', 'feedingsPerDay'])
+          && data.name is string
+          && data.name.size() >= 1
+          && data.name.size() <= 80
+          && data.species is string
+          && data.species.size() >= 1
+          && data.species.size() <= 40
+          && data.feedingsPerDay is int
+          && data.feedingsPerDay >= 1
+          && data.feedingsPerDay <= 24;
+      }
+
+      // Uusi kuva korvaa aiemman kuvan samassa kentässä.
+      function isPetPhotoUpdate() {
+        let data = request.resource.data;
+        let changed = data.diff(resource.data).affectedKeys();
+
+        return changed.hasOnly(['photo'])
+          && 'photo' in data
+          && data.photo is bytes
+          && data.photo.size() > 0
+          && data.photo.size() <= 204800;
+      }
+
+      // Omistaja voi käynnistää lemmikin poiston asettamalla poistotilan.
+      function isOwnerStartingPetDeletion() {
+        return isHouseholdOwner(resource.data.householdId)
+          && request.resource.data.diff(resource.data)
+            .affectedKeys().hasOnly(['isDeleting'])
+          && request.resource.data.isDeleting == true;
+      }
+
       allow read: if isHouseholdMember(resource.data.householdId);
 
-      // Jäsen voi luoda lemmikin vain aktiiviseen kotitalouteen.
       allow create: if isSignedIn()
         && request.resource.data.keys().hasAll([
           'name', 'species', 'householdId',
@@ -209,55 +266,36 @@ service cloud.firestore {
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.createdAt == request.time;
 
-      // Kaikki aktiivisen kotitalouden jäsenet saavat muokata lemmikin perustietoja.
-      function isPetDetailsUpdate() {
-        let data = request.resource.data;
-        let changed = data.diff(resource.data).affectedKeys();
-
-        return changed.hasOnly(['name', 'species', 'feedingsPerDay'])
-          && data.name is string
-          && data.name.size() >= 1
-          && data.name.size() <= 80
-          && data.species is string
-          && data.species.size() >= 1
-          && data.species.size() <= 40
-          && data.feedingsPerDay is int
-          && data.feedingsPerDay >= 1
-          && data.feedingsPerDay <= 24;
-      }
-
-      // Ensimmäinen kuva ja korvaava kuva kirjoitetaan samaan kenttään.
-      function isPetPhotoUpdate() {
-        let data = request.resource.data;
-        let changed = data.diff(resource.data).affectedKeys();
-
-        return changed.hasOnly(['photo'])
-          && 'photo' in data
-          && data.photo is bytes
-          && data.photo.size() > 0
-          && data.photo.size() <= 204800;
-      }
-
+      // Muokkaus ja kuvanvaihto ovat sallittuja vain aktiiviselle lemmikille.
       allow update: if isHouseholdMember(resource.data.householdId)
         && isHouseholdActiveAfter(resource.data.householdId)
-        && (isPetDetailsUpdate() || isPetPhotoUpdate());
+        && resource.data.get('isDeleting', false) == false
+        && (
+          isPetDetailsUpdate()
+          || isPetPhotoUpdate()
+          || isOwnerStartingPetDeletion()
+        );
 
-      // Omistaja voi poistaa lemmikit osana kotitalouden poistamista.
-      allow delete: if ownsDeletingHousehold(resource.data.householdId);
+      // Omistaja voi viimeistellä kotitalouden tai yksittäisen lemmikin poiston.
+      allow delete: if ownsDeletingHousehold(resource.data.householdId)
+        || (
+          resource.data.get('isDeleting', false) == true
+          && isHouseholdOwner(resource.data.householdId)
+        );
     }
 
     match /feedings/{feedingId} {
 
-    // Kotitalouden jäsenet voivat lukea sen ruokintakirjaukset.
-    allow read: if isHouseholdMember(resource.data.householdId);
+      allow read: if isHouseholdMember(resource.data.householdId);
 
-    // Jäsen voi kirjata ruokinnan olemassa olevalle, saman kotitalouden lemmikille.
-    allow create: if isSignedIn()
+      // Jäsen voi kirjata oman ruokintansa aktiiviseen kotitalouteen
+      // kuuluvalle aktiiviselle lemmikille.
+      allow create: if isSignedIn()
         && request.resource.data.keys().hasAll([
-        'petId', 'householdId', 'fedBy', 'fedAt'
+          'petId', 'householdId', 'fedBy', 'fedAt'
         ])
         && request.resource.data.keys().hasOnly([
-        'petId', 'householdId', 'fedBy', 'fedAt'
+          'petId', 'householdId', 'fedBy', 'fedAt'
         ])
         && request.resource.data.petId is string
         && request.resource.data.petId.size() > 0
@@ -267,17 +305,21 @@ service cloud.firestore {
         && request.resource.data.fedAt == request.time
         && isHouseholdMember(request.resource.data.householdId)
         && isHouseholdActiveAfter(request.resource.data.householdId)
-        && getAfter(
-        /databases/$(database)/documents/pets/$(request.resource.data.petId)
-        ).data.householdId == request.resource.data.householdId;
+        && isActivePetAfter(
+          request.resource.data.petId,
+          request.resource.data.householdId
+        );
 
-    allow update: if false;
+      allow update: if false;
 
-    // Omistaja voi poistaa kirjaukset kotitalouden poistamisen yhteydessä.
-    allow delete: if ownsDeletingHousehold(resource.data.householdId);
+      // Omistaja voi poistaa ruokinnat kotitalouden tai lemmikin poiston aikana.
+      allow delete: if ownsDeletingHousehold(resource.data.householdId)
+        || canDeletePetFeeding(
+          resource.data.petId,
+          resource.data.householdId
+        );
     }
 
-    // Muut tietokannan operaatiot on oletuksena estetty.
     match /{document=**} {
       allow read, write: if false;
     }

@@ -133,7 +133,7 @@ export default function PetCard({
 
       {isDeleting && (
         <Text style={styles.error}>
-          This household is being deleted. New feedings are disabled.
+          Deletion is in progress. New feedings are disabled for this pet.
         </Text>
       )}
 

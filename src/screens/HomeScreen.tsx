@@ -252,7 +252,7 @@ function HouseholdPetCards({
           )}
           feedingsLoading={feedingsLoading}
           feedingsError={feedingsError}
-          isDeleting={household.isDeleting === true}
+          isDeleting={household.isDeleting === true || pet.isDeleting === true}
         />
       ))}
     </>

@@ -10,4 +10,5 @@ export type Pet = {
   createdBy: string;
   createdAt: Timestamp | null;
   photo?: Bytes;
+  isDeleting?: boolean;
 };

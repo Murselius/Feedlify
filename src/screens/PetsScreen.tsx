@@ -9,6 +9,7 @@ import type { Household } from '../types/household';
 import type { Pet } from '../types/pet';
 import PetPhoto from '../components/PetPhoto';
 import EditPetModal from '../components/EditPetModal';
+import DeletePetButton from '../components/DeletePetButton';
 
 //Näyttää käyttäjän kotitaloudet ja valitun kotitalouden lemmikit. Sisältää lomakkeen lemmikin lisäämiseen valittuun kotitalouteen.
 export default function PetsScreen() {
@@ -129,6 +130,7 @@ export default function PetsScreen() {
           <HouseholdPets
             key={selectedHousehold.id}
             household={selectedHousehold}
+            isOwner={selectedHousehold.ownerId === userId}
           />
         )}
       </ScrollView>
@@ -140,7 +142,7 @@ export default function PetsScreen() {
  * Kuuntelee yhden kotitalouden lemmikkejä ja hoitaa lisäyslomakkeen.
  * Kotitalouden vaihtuessa komponentin tila alustetaan uudelleen.
  */
-function HouseholdPets({ household }: { household: Household }) {
+function HouseholdPets({ household, isOwner }: { household: Household; isOwner: boolean }) {
   const [pets, setPets] = useState<Pet[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -304,34 +306,46 @@ function HouseholdPets({ household }: { household: Household }) {
         </Text>
       )}
 
-      {pets.map((pet) => (
-        <View key={pet.id} style={styles.card}>
-          <Text style={styles.heading}>{pet.name}</Text>
+      {pets.map((pet) => {
+        const canEdit = !household.isDeleting && !pet.isDeleting;
 
-          <PetPhoto pet={pet} editable={household.isDeleting !== true} />
+        return (
+          <View key={pet.id} style={styles.card}>
+            <Text style={styles.heading}>{pet.name}</Text>
 
-          <Text style={styles.text}>Species: {pet.species}</Text>
-          <Text style={styles.text}>
-            Feedings per Day: {pet.feedingsPerDay}
-          </Text>
+            <PetPhoto pet={pet} editable={canEdit} />
 
-          {!household.isDeleting && (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Edit ${pet.name}`}
-              onPress={() => setEditingPetId(pet.id)}
-              style={({ pressed }) => [
-                styles.saveButton,
-                { backgroundColor: pressed ? '#1D4ED8' : '#2563EB' },
-              ]}
-            >
-              <Text style={styles.saveButtonText}>Edit</Text>
-            </Pressable>
-          )}
-        </View>
-      ))}
+            <Text style={styles.text}>Species: {pet.species}</Text>
+            <Text style={styles.text}>
+              Feedings per Day: {pet.feedingsPerDay}
+            </Text>
 
-      {editingPet && !household.isDeleting && (
+            {pet.isDeleting && (
+              <Text style={styles.error}>Deletion has started for this pet.</Text>
+            )}
+
+            {canEdit && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Edit ${pet.name}`}
+                onPress={() => setEditingPetId(pet.id)}
+                style={({ pressed }) => [
+                  styles.saveButton,
+                  { backgroundColor: pressed ? '#1D4ED8' : '#2563EB' },
+                ]}
+              >
+                <Text style={styles.saveButtonText}>Edit</Text>
+              </Pressable>
+            )}
+
+            {isOwner && !household.isDeleting && (
+              <DeletePetButton pet={pet} />
+            )}
+          </View>
+        );
+      })}
+
+      {editingPet && !editingPet.isDeleting && !household.isDeleting && (
         <EditPetModal
           key={editingPet.id}
           pet={editingPet}
