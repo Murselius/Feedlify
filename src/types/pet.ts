@@ -1,4 +1,4 @@
-import type { Timestamp } from 'firebase/firestore';
+import type { Bytes, Timestamp } from 'firebase/firestore';
 
 //lemmikki ja sen päivittäinen ruokintatavoite. id saadaan Firestore-dokumentin tunnisteesta.
 export type Pet = {
@@ -9,4 +9,5 @@ export type Pet = {
   feedingsPerDay: number;
   createdBy: string;
   createdAt: Timestamp | null;
+  photo?: Bytes;
 };

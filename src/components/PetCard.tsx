@@ -4,6 +4,7 @@ import { FirebaseError } from 'firebase/app';
 import { recordFeeding } from '../services/feedings';
 import type { Feeding } from '../types/feeding';
 import type { Pet } from '../types/pet';
+import PetPhoto from './PetPhoto';
 
 type Props = {
   pet: Pet;
@@ -92,6 +93,7 @@ export default function PetCard({
   return (
     <View style={styles.card}>
       <Text style={styles.heading}>{pet.name}</Text>
+      <PetPhoto pet={pet} />
       <Text style={styles.text}>Species: {pet.species}</Text>
 
       {feedingsLoading ? (

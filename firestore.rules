@@ -209,7 +209,38 @@ service cloud.firestore {
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.createdAt == request.time;
 
-      allow update: if false;
+      // Kaikki aktiivisen kotitalouden jäsenet saavat muokata lemmikin perustietoja.
+      function isPetDetailsUpdate() {
+        let data = request.resource.data;
+        let changed = data.diff(resource.data).affectedKeys();
+
+        return changed.hasOnly(['name', 'species', 'feedingsPerDay'])
+          && data.name is string
+          && data.name.size() >= 1
+          && data.name.size() <= 80
+          && data.species is string
+          && data.species.size() >= 1
+          && data.species.size() <= 40
+          && data.feedingsPerDay is int
+          && data.feedingsPerDay >= 1
+          && data.feedingsPerDay <= 24;
+      }
+
+      // Ensimmäinen kuva ja korvaava kuva kirjoitetaan samaan kenttään.
+      function isPetPhotoUpdate() {
+        let data = request.resource.data;
+        let changed = data.diff(resource.data).affectedKeys();
+
+        return changed.hasOnly(['photo'])
+          && 'photo' in data
+          && data.photo is bytes
+          && data.photo.size() > 0
+          && data.photo.size() <= 204800;
+      }
+
+      allow update: if isHouseholdMember(resource.data.householdId)
+        && isHouseholdActiveAfter(resource.data.householdId)
+        && (isPetDetailsUpdate() || isPetPhotoUpdate());
 
       // Omistaja voi poistaa lemmikit osana kotitalouden poistamista.
       allow delete: if ownsDeletingHousehold(resource.data.householdId);

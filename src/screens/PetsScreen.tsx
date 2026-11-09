@@ -7,6 +7,7 @@ import { subscribeToHouseholds } from '../services/households';
 import { createPet, subscribeToPets } from '../services/pets';
 import type { Household } from '../types/household';
 import type { Pet } from '../types/pet';
+import PetPhoto from '../components/PetPhoto';
 
 //Näyttää käyttäjän kotitaloudet ja valitun kotitalouden lemmikit. Sisältää lomakkeen lemmikin lisäämiseen valittuun kotitalouteen.
 export default function PetsScreen() {
@@ -303,6 +304,9 @@ function HouseholdPets({ household }: { household: Household }) {
       {pets.map((pet) => (
         <View key={pet.id} style={styles.card}>
           <Text style={styles.heading}>{pet.name}</Text>
+
+          <PetPhoto pet={pet} editable={household.isDeleting !== true} />
+
           <Text style={styles.text}>Species: {pet.species}</Text>
           <Text style={styles.text}>
             Feedings per Day: {pet.feedingsPerDay}
