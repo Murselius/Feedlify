@@ -8,6 +8,7 @@ import { createPet, subscribeToPets } from '../services/pets';
 import type { Household } from '../types/household';
 import type { Pet } from '../types/pet';
 import PetPhoto from '../components/PetPhoto';
+import EditPetModal from '../components/EditPetModal';
 
 //Näyttää käyttäjän kotitaloudet ja valitun kotitalouden lemmikit. Sisältää lomakkeen lemmikin lisäämiseen valittuun kotitalouteen.
 export default function PetsScreen() {
@@ -143,6 +144,8 @@ function HouseholdPets({ household }: { household: Household }) {
   const [pets, setPets] = useState<Pet[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [editingPetId, setEditingPetId] = useState<string | null>(null);
+  const editingPet = pets.find((pet) => pet.id === editingPetId);
 
   const [name, setName] = useState('');
   const [species, setSpecies] = useState('');
@@ -311,8 +314,30 @@ function HouseholdPets({ household }: { household: Household }) {
           <Text style={styles.text}>
             Feedings per Day: {pet.feedingsPerDay}
           </Text>
+
+          {!household.isDeleting && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Edit ${pet.name}`}
+              onPress={() => setEditingPetId(pet.id)}
+              style={({ pressed }) => [
+                styles.saveButton,
+                { backgroundColor: pressed ? '#1D4ED8' : '#2563EB' },
+              ]}
+            >
+              <Text style={styles.saveButtonText}>Edit</Text>
+            </Pressable>
+          )}
         </View>
       ))}
+
+      {editingPet && !household.isDeleting && (
+        <EditPetModal
+          key={editingPet.id}
+          pet={editingPet}
+          onClose={() => setEditingPetId(null)}
+        />
+      )}
     </>
   );
 }
