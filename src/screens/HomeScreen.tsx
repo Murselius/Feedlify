@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Button, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Button, ScrollView, StyleSheet, Text, View, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { signOut } from 'firebase/auth';
@@ -12,12 +12,14 @@ import PetCard from '../components/PetCard';
 import type { RootStackParamList } from '../navigation/types';
 import type { Household } from '../types/household';
 import type { Pet } from '../types/pet';
+import { ensureNotificationPermission, hasNotificationPermission, pruneFeedingReminders, syncHouseholdReminders } from '../services/notifications';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
 type HouseholdPetCardsProps = {
   household: Household;
   onPetCountChange: (householdId: string, count: number | null) => void;
+  remindersEnabled: boolean;
 };
 
 // Näyttää kaikkien käyttäjän kotitalouksien lemmikit yhtenä listana
@@ -64,6 +66,33 @@ export default function HomeScreen({ navigation }: Props) {
     );
   }, [userId]);
 
+  const [remindersEnabled, setRemindersEnabled] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    hasNotificationPermission()
+      .then((granted) => {
+        if (active) setRemindersEnabled(granted);
+      })
+      .catch(() => {
+        if (active) setRemindersEnabled(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!userId || householdsLoading || householdsError) return;
+
+    void pruneFeedingReminders(
+      userId,
+      households.map((household) => household.id),
+    ).catch((error) => console.warn('Could not clean up feeding reminders:', error));
+  }, [userId, households, householdsLoading, householdsError]);
+
   // Kerää lemmikkimäärät yhteisen tyhjän tilan näyttämistä varten.
   const handlePetCountChange = useCallback(
     (householdId: string, count: number | null) => {
@@ -93,6 +122,9 @@ export default function HomeScreen({ navigation }: Props) {
 
     try {
       await signOut(auth);
+      await pruneFeedingReminders(null, []).catch((error) => {
+        console.warn('Could not clear feeding reminders after sign out:', error);
+      });
     } catch {
       setLogoutError('Sign out failed.');
     } finally {
@@ -137,6 +169,23 @@ export default function HomeScreen({ navigation }: Props) {
             onPress={handleLogout}
             disabled={isSigningOut}
           />
+
+          {!remindersEnabled && (
+            <Button
+              title="Enable feeding reminders"
+              onPress={async () => {
+                try {
+                  await ensureNotificationPermission();
+                  setRemindersEnabled(true);
+                } catch (error) {
+                  Alert.alert(
+                    'Feeding reminders',
+                    error instanceof Error ? error.message : 'Could not enable reminders.',
+                  );
+                }
+              }}
+            />
+          )}
         </View>
 
         {logoutError !== '' && (
@@ -180,8 +229,7 @@ export default function HomeScreen({ navigation }: Props) {
           <HouseholdPetCards
             key={household.id}
             household={household}
-            onPetCountChange={handlePetCountChange}
-          />
+            onPetCountChange={handlePetCountChange} remindersEnabled={remindersEnabled}/>
         ))}
       </ScrollView>
     </SafeAreaView>
@@ -193,6 +241,7 @@ export default function HomeScreen({ navigation }: Props) {
 function HouseholdPetCards({
   household,
   onPetCountChange,
+  remindersEnabled,
 }: HouseholdPetCardsProps) {
   const [pets, setPets] = useState<Pet[]>([]);
   const [petsLoading, setPetsLoading] = useState(true);
@@ -227,6 +276,40 @@ function HouseholdPetCards({
       },
     );
   }, [household.id, onPetCountChange]);
+
+    useEffect(() => {
+    const userId = auth.currentUser?.uid;
+
+    if (
+      !userId ||
+      !remindersEnabled ||
+      petsLoading ||
+      feedingsLoading ||
+      petsError ||
+      feedingsError
+    ) return;
+
+    void syncHouseholdReminders(
+      userId,
+      household.id,
+      household.isDeleting ? [] : pets,
+      feedings,
+      dayStart,
+    ).catch((error) => {
+      console.warn('Could not schedule feeding reminders:', error);
+    });
+  }, [
+    remindersEnabled,
+    household.id,
+    household.isDeleting,
+    pets,
+    petsLoading,
+    petsError,
+    feedings,
+    feedingsLoading,
+    feedingsError,
+    dayStart,
+  ]);
 
   return (
     <>

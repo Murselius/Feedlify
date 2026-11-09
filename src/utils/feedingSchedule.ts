@@ -79,11 +79,11 @@ export function formatFeedingTime(minute: number): string {
   return `${hours}:${minutes}`;
 }
 
-// Palauttaa ensimmäisen kuittaamattoman ajan tai null, jos kaikki on kuitattu.
-export function getNextFeedingMinute(
+// Palauttaa kaikki päivän kuittaamattomat ajat aikajärjestyksessä.
+export function getRemainingFeedingMinutes(
   count: number,
   feedings: Pick<Feeding, 'scheduledMinute'>[],
-): number | null {
+): number[] {
   const schedule = getFeedingSchedule(count);
   const claimed = new Set<number>();
   let legacyCount = 0;
@@ -96,10 +96,33 @@ export function getNextFeedingMinute(
     }
   }
 
-  // Ennen aikatauluominaisuutta tehdyt kirjaukset kattavat päivän ensimmäiset ajat.
   for (const minute of schedule.slice(0, legacyCount)) {
     claimed.add(minute);
   }
 
-  return schedule.find((minute) => !claimed.has(minute)) ?? null;
+  return schedule.filter((minute) => !claimed.has(minute));
+}
+
+export function getNextFeedingMinute(
+  count: number,
+  feedings: Pick<Feeding, 'scheduledMinute'>[],
+): number | null {
+  return getRemainingFeedingMinutes(count, feedings)[0] ?? null;
+}
+
+// Palauttaa kellonajan todellisen ajanhetken Suomen aikavyöhykkeellä.
+// Syksyn toistuva tunti ilmoitetaan kerran, ensimmäisellä esiintymällä.
+// Keväällä kellosta puuttuvalla kellonajalla ei ole ilmoitushetkeä.
+export function getFeedingInstant(
+  day: ReturnType<typeof getFeedingDay>,
+  minute: number,
+): number | null {
+  const wallTime = day.dayNumber * DAY_MS + minute * 60_000;
+
+  const candidates = [
+    day.start + minute * 60_000,
+    day.end - DAY_MS + minute * 60_000,
+  ].sort((a, b) => a - b);
+
+  return candidates.find((instant) => civilTime(new Date(instant)) === wallTime) ?? null;
 }
