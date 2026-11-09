@@ -286,16 +286,39 @@ service cloud.firestore {
 
     match /feedings/{feedingId} {
 
+      // Tarkistaa ajan lemmikin nykyisestä tavoitteesta ja sitoo sen dokumentin tunnisteeseen.
+      function isScheduledSlot() {
+        let data = request.resource.data;
+        let count = getAfter(
+          /databases/$(database)/documents/pets/$(data.petId)
+        ).data.feedingsPerDay;
+        let civilMidnight = data.scheduleDay * 86400000;
+
+        return data.slotIndex is int
+          && data.slotIndex >= 0
+          && data.slotIndex < count
+          && data.scheduledMinute is int
+          && data.scheduledMinute == 15 * math.round(96.0 * data.slotIndex / count)
+          && data.scheduleDay is int
+          && data.dayStart is timestamp
+          && data.dayEnd is timestamp
+          && ((civilMidnight - data.dayStart.toMillis()) in [7200000, 10800000])
+          && ((civilMidnight + 86400000 - data.dayEnd.toMillis()) in [7200000, 10800000])
+          && data.dayStart <= request.time
+          && request.time < data.dayEnd
+          && feedingId == data.petId + '_' + string(data.scheduleDay) + '_' + string(data.scheduledMinute);
+      }
+
       allow read: if isHouseholdMember(resource.data.householdId);
 
-      // Jäsen voi kirjata oman ruokintansa aktiiviseen kotitalouteen
-      // kuuluvalle aktiiviselle lemmikille.
       allow create: if isSignedIn()
         && request.resource.data.keys().hasAll([
-          'petId', 'householdId', 'fedBy', 'fedAt'
+          'petId', 'householdId', 'fedBy', 'fedAt',
+          'scheduledMinute', 'scheduleDay', 'slotIndex', 'dayStart', 'dayEnd'
         ])
         && request.resource.data.keys().hasOnly([
-          'petId', 'householdId', 'fedBy', 'fedAt'
+          'petId', 'householdId', 'fedBy', 'fedAt',
+          'scheduledMinute', 'scheduleDay', 'slotIndex', 'dayStart', 'dayEnd'
         ])
         && request.resource.data.petId is string
         && request.resource.data.petId.size() > 0
@@ -305,6 +328,7 @@ service cloud.firestore {
         && request.resource.data.fedAt == request.time
         && isHouseholdMember(request.resource.data.householdId)
         && isHouseholdActiveAfter(request.resource.data.householdId)
+        && isScheduledSlot()
         && isActivePetAfter(
           request.resource.data.petId,
           request.resource.data.householdId
@@ -312,7 +336,6 @@ service cloud.firestore {
 
       allow update: if false;
 
-      // Omistaja voi poistaa ruokinnat kotitalouden tai lemmikin poiston aikana.
       allow delete: if ownsDeletingHousehold(resource.data.householdId)
         || canDeletePetFeeding(
           resource.data.petId,

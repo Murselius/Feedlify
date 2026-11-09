@@ -3,11 +3,13 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { FirebaseError } from 'firebase/app';
 import { recordFeeding } from '../services/feedings';
 import type { Feeding } from '../types/feeding';
+import { FEEDING_TIME_ZONE, formatFeedingTime, getNextFeedingMinute } from '../utils/feedingSchedule';
 import type { Pet } from '../types/pet';
 import PetPhoto from './PetPhoto';
 
 type Props = {
   pet: Pet;
+  dayStart: number;
   feedings: Feeding[];
   feedingsLoading: boolean;
   feedingsError: string;
@@ -17,6 +19,7 @@ type Props = {
 // Näyttää lemmikin päivän ruokinnat ja mahdollistaa uuden ruokinnan kirjaamisen.
 export default function PetCard({
   pet,
+  dayStart,
   feedings,
   feedingsLoading,
   feedingsError,
@@ -37,17 +40,20 @@ export default function PetCard({
   );
 
   const count = confirmedFeedings.length;
-  const targetReached = count >= pet.feedingsPerDay;
+  const nextMinute = getNextFeedingMinute(pet.feedingsPerDay, confirmedFeedings);
+  const targetReached = nextMinute === null;
 
   const isRecordDisabled =
     isRecording ||
     isDeleting ||
     feedingsLoading ||
     feedingsError !== '' ||
-    hasPendingFeeding;
+    hasPendingFeeding ||
+    targetReached;
 
   const latestTime = latestFeeding?.fedAt
     ? latestFeeding.fedAt.toDate().toLocaleTimeString([], {
+        timeZone: FEEDING_TIME_ZONE,
         hour: '2-digit',
         minute: '2-digit',
       })
@@ -55,14 +61,22 @@ export default function PetCard({
 
   // Estää saman kortin päällekkäiset tallennukset.
   const handleRecordFeeding = async () => {
-    if (recordingInProgress.current || isRecordDisabled) return;
+    if (recordingInProgress.current || isRecordDisabled || nextMinute === null) {
+      return;
+    }
 
     recordingInProgress.current = true;
     setIsRecording(true);
     setRecordError('');
 
     try {
-      await recordFeeding(pet.id, pet.householdId);
+      await recordFeeding(
+        pet.id,
+        pet.householdId,
+        pet.feedingsPerDay,
+        dayStart,
+        nextMinute,
+      );
     } catch (error) {
       if (error instanceof FirebaseError) {
         switch (error.code) {
@@ -111,6 +125,10 @@ export default function PetCard({
             ]}
           >
             Today: {count} / {pet.feedingsPerDay}
+          </Text>
+
+          <Text style={styles.text}>
+            Next feeding: {nextMinute === null ? 'tomorrow 00:00' : formatFeedingTime(nextMinute)}
           </Text>
 
           {targetReached && (
@@ -164,7 +182,11 @@ export default function PetCard({
         ]}
       >
         <Text style={styles.buttonText}>
-          {isRecording ? 'Recording…' : 'Record feeding'}
+          {isRecording
+            ? 'Recording…'
+            : nextMinute === null
+              ? 'All feedings recorded'
+              : `Feed · ${formatFeedingTime(nextMinute)}`}
         </Text>
       </Pressable>
     </View>

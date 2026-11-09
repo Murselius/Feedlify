@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AppState } from 'react-native';
 import { subscribeToFeedingsForDay } from '../services/feedings';
 import type { Feeding } from '../types/feeding';
+import { getFeedingDay } from '../utils/feedingSchedule';
 
 type DailyFeedingsState = {
   householdId: string;
@@ -13,13 +14,7 @@ type DailyFeedingsState = {
 
 // Palauttaa nykyisen paikallisen kalenteripäivän alkamisajan.
 function getTodayStart(): number {
-  const now = new Date();
-
-  return new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
-  ).getTime();
+  return getFeedingDay().start;
 }
 
 // Kuuntelee kotitalouden tämän päivän ruokintoja ja vaihtaa kuuntelun
@@ -106,6 +101,7 @@ export function useDailyFeedings(householdId: string) {
     state.dayStart !== dayStart
   ) {
     return {
+      dayStart,
       feedings: [] as Feeding[],
       loading: true,
       error: '',
@@ -113,6 +109,7 @@ export function useDailyFeedings(householdId: string) {
   }
 
   return {
+    dayStart,
     feedings: state.feedings,
     loading: state.loading,
     error: state.error,

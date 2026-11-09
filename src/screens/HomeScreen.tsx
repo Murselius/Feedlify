@@ -202,6 +202,7 @@ function HouseholdPetCards({
     feedings,
     loading: feedingsLoading,
     error: feedingsError,
+    dayStart,
   } = useDailyFeedings(household.id);
 
   useEffect(() => {
@@ -247,6 +248,7 @@ function HouseholdPetCards({
         <PetCard
           key={pet.id}
           pet={pet}
+          dayStart={dayStart}
           feedings={feedings.filter(
             (feeding) => feeding.petId === pet.id,
           )}

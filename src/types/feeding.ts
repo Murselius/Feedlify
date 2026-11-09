@@ -8,4 +8,5 @@ export type Feeding = {
   householdId: string;
   fedBy: string;
   fedAt: Timestamp | null;
+  scheduledMinute?: number;
 };
