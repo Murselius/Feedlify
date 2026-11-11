@@ -15,6 +15,7 @@ import type { RootStackParamList } from '../navigation/types';
 import type { Household } from '../types/household';
 import type { Pet } from '../types/pet';
 import { ensureNotificationPermission, hasNotificationPermission, pruneFeedingReminders, syncHouseholdReminders, getAndroidFcmToken } from '../services/notifications';
+import DisplayNameField from '../components/DisplayNameField';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
@@ -205,11 +206,7 @@ export default function HomeScreen({ navigation }: Props) {
 
         <Text style={styles.description}>Keep your pets fed.</Text>
 
-        {user && (
-          <Text style={styles.text}>
-            Signed in as: {user.email}
-          </Text>
-        )}
+        {user && <DisplayNameField key={user.uid} user={user} />}
 
         <View style={styles.buttons}>
           <Button
