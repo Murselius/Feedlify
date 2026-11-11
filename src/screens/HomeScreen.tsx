@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Button, ScrollView, StyleSheet, Text, View, Alert } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Button, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import * as Notifications from 'expo-notifications';
+import { getInstallationId, registerPushDevice, unregisterPushDevice } from '../services/pushDevices';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { signOut } from 'firebase/auth';
@@ -12,7 +14,7 @@ import PetCard from '../components/PetCard';
 import type { RootStackParamList } from '../navigation/types';
 import type { Household } from '../types/household';
 import type { Pet } from '../types/pet';
-import { ensureNotificationPermission, hasNotificationPermission, pruneFeedingReminders, syncHouseholdReminders } from '../services/notifications';
+import { ensureNotificationPermission, hasNotificationPermission, pruneFeedingReminders, syncHouseholdReminders, getAndroidFcmToken } from '../services/notifications';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
@@ -35,6 +37,7 @@ export default function HomeScreen({ navigation }: Props) {
     useState<Record<string, number | null>>({});
 
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const logoutStarted = useRef(false);
   const [logoutError, setLogoutError] = useState('');
 
   useEffect(() => {
@@ -84,6 +87,54 @@ export default function HomeScreen({ navigation }: Props) {
     };
   }, []);
 
+    // Rekisteröi Android-laitteen ja päivittää saman dokumentin tunnuksen vaihtuessa.
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !userId || !remindersEnabled || isSigningOut) {
+      return;
+    }
+
+    let active = true;
+    let receivedTokenEvent = false;
+    let latestToken = '';
+
+    const saveToken = async (token: string) => {
+      if (token === latestToken) return;
+      latestToken = token;
+
+      try {
+        const installationId = await getInstallationId();
+
+        if (!active || logoutStarted.current || auth.currentUser?.uid !== userId) return;
+        if (token !== latestToken) return;
+
+        await registerPushDevice(userId, installationId, token);
+      } catch (error) {
+        if (latestToken === token) latestToken = '';
+        if (active) console.warn('Could not register this device:', error);
+      }
+    };
+
+    const subscription = Notifications.addPushTokenListener((token) => {
+      if (token.type === 'android' && typeof token.data === 'string' && token.data) {
+        receivedTokenEvent = true;
+        void saveToken(token.data);
+      }
+    });
+
+    void getAndroidFcmToken()
+      .then((token) => {
+        if (active && !receivedTokenEvent) return saveToken(token);
+      })
+      .catch((error: unknown) => {
+        if (active) console.warn('Could not get the device token:', error);
+      });
+
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, [userId, remindersEnabled, isSigningOut]);
+
   useEffect(() => {
     if (!userId || householdsLoading || householdsError) return;
 
@@ -115,19 +166,28 @@ export default function HomeScreen({ navigation }: Props) {
     households.every((household) => petCounts[household.id] === 0);
 
   const handleLogout = async () => {
-    if (isSigningOut) return;
+    if (logoutStarted.current || !userId) return;
 
-    setLogoutError('');
+    logoutStarted.current = true;
     setIsSigningOut(true);
+    setLogoutError('');
 
     try {
+      if (Platform.OS === 'android') {
+        const installationId = await getInstallationId();
+        await unregisterPushDevice(userId, installationId);
+      }
+
       await signOut(auth);
+
       await pruneFeedingReminders(null, []).catch((error) => {
         console.warn('Could not clear feeding reminders after sign out:', error);
       });
-    } catch {
-      setLogoutError('Sign out failed.');
+    } catch (error) {
+      console.warn('Could not complete sign out:', error);
+      setLogoutError('Sign out failed. Please try again.');
     } finally {
+      logoutStarted.current = false;
       setIsSigningOut(false);
     }
   };

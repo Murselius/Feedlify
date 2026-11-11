@@ -166,3 +166,16 @@ export function pruneFeedingReminders(
     }
   });
 }
+
+// Hakee tämän Feedlify-asennuksen Androidin FCM-rekisteröintitunnuksen.
+export async function getAndroidFcmToken(): Promise<string> {
+  await ensureNotificationPermission();
+
+  const token = await Notifications.getDevicePushTokenAsync();
+
+  if (token.type !== 'android' || typeof token.data !== 'string' || !token.data) {
+    throw new Error('Could not get an Android FCM token.');
+  }
+
+  return token.data;
+}

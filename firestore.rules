@@ -343,6 +343,24 @@ service cloud.firestore {
         );
     }
 
+    // Käyttäjä voi rekisteröidä ja poistaa omien laitteidensa ilmoitustunnukset.
+    match /users/{userId}/pushDevices/{installationId} {
+      function isDeviceOwner() {
+        return isSignedIn() && request.auth.uid == userId;
+      }
+
+      allow create, update: if isDeviceOwner()
+        && request.resource.data.keys().hasAll(['token', 'platform', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['token', 'platform', 'updatedAt'])
+        && request.resource.data.token is string
+        && request.resource.data.token.size() > 0
+        && request.resource.data.token.size() <= 4096
+        && request.resource.data.platform == 'android'
+        && request.resource.data.updatedAt == request.time;
+
+      allow delete: if isDeviceOwner();
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
