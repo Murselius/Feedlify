@@ -104,6 +104,7 @@ export default function HomeScreen({ navigation }: Props) {
 
       try {
         const installationId = await getInstallationId();
+        await pruneFeedingReminders(null, []);
 
         if (!active || logoutStarted.current || auth.currentUser?.uid !== userId) return;
         if (token !== latestToken) return;
@@ -176,7 +177,6 @@ export default function HomeScreen({ navigation }: Props) {
     try {
       if (Platform.OS === 'android') {
         const installationId = await getInstallationId();
-        await pruneFeedingReminders(null, []);
         await unregisterPushDevice(userId, installationId);
       }
 
