@@ -126,3 +126,20 @@ export function getFeedingInstant(
 
   return candidates.find((instant) => civilTime(new Date(instant)) === wallTime) ?? null;
 }
+
+// Palauttaa tarkistusvälillä erääntyneet ruokinta-ajat, jotka ovat vielä kuittaamatta.
+// Kutsuja antaa tarkistettavan päivän ja juuri sen päivän ruokintakirjaukset.
+export function getDueFeedingMinutes(
+  day: ReturnType<typeof getFeedingDay>,
+  feedingsPerDay: number,
+  feedings: Pick<Feeding, 'scheduledMinute'>[],
+  after: number,
+  through: number,
+): number[] {
+  const remaining = getRemainingFeedingMinutes(feedingsPerDay, feedings);
+
+  return remaining.filter((minute) => {
+    const dueAt = getFeedingInstant(day, minute);
+    return dueAt !== null && dueAt > after && dueAt <= through;
+  });
+}

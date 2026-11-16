@@ -1,6 +1,79 @@
 import { applicationDefault, initializeApp } from 'firebase-admin/app';
-import { getFirestore, type Firestore } from 'firebase-admin/firestore';
+import { getFirestore, Timestamp, type Firestore } from 'firebase-admin/firestore';
+import { formatFeedingTime, getDueFeedingMinutes, getFeedingDay } from '../src/utils/feedingSchedule.ts';
 import { getMessaging } from 'firebase-admin/messaging';
+
+const QUARTER_MS = 15 * 60_000;
+
+// Tarkistaa yhdelle vartille osuvat ruokinnat ja ohittaa jo kuitatut ajat.
+async function checkDueReminders(db: Firestore, at: number): Promise<void> {
+  const day = getFeedingDay(new Date(at));
+  const pets = await db.collection('pets')
+    .select('name', 'householdId', 'feedingsPerDay', 'isDeleting')
+    .get();
+
+  const candidates = pets.docs.filter((document) => {
+    const pet = document.data();
+    if (pet.isDeleting) return false;
+
+    return getDueFeedingMinutes(day, pet.feedingsPerDay, [], at - 1, at).length > 0;
+  });
+
+  if (candidates.length === 0) return;
+
+  const feedings = await db.collection('feedings')
+    .where('fedAt', '>=', Timestamp.fromMillis(day.start))
+    .where('fedAt', '<', Timestamp.fromMillis(day.end))
+    .select('householdId', 'petId', 'scheduledMinute')
+    .get();
+
+  const entries = feedings.docs.map((document) => document.data());
+
+  for (const document of candidates) {
+    const pet = document.data();
+    const claims = entries
+      .filter((entry) => entry.petId === document.id && entry.householdId === pet.householdId)
+      .map((entry) => ({ scheduledMinute: entry.scheduledMinute }));
+
+    const [minute] = getDueFeedingMinutes(day, pet.feedingsPerDay, claims, at - 1, at);
+
+    if (minute === undefined) {
+      console.log(`${pet.name}: ruokinta jo kuitattu, muistutus ohitetaan.`);
+    } else {
+      console.log(`${formatFeedingTime(minute)} | It's time to feed ${pet.name}`);
+    }
+  }
+}
+
+// Käynnistää tarkistuksen seuraavalla tasavartilla ja palauttaa lopetusfunktion.
+function startReminderChecks(db: Firestore): () => Promise<void> {
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout>;
+  let pending: Promise<void> = Promise.resolve();
+
+  function scheduleNext() {
+    const now = Date.now();
+    const at = (Math.floor(now / QUARTER_MS) + 1) * QUARTER_MS;
+
+    timer = setTimeout(() => {
+      pending = checkDueReminders(db, at)
+        .catch((error: unknown) => {
+          console.error('Muistutusten tarkistus epäonnistui.', error);
+        })
+        .finally(() => {
+          if (!stopped) scheduleNext();
+        });
+    }, at - now);
+  }
+
+  scheduleNext();
+
+  return async () => {
+    stopped = true;
+    clearTimeout(timer);
+    await pending;
+  };
+}
 
 // Kuuntelee käynnistyksen jälkeen kirjattuja ruokintoja ja käsittelee ne järjestyksessä.
 async function watchFeedings(
@@ -163,7 +236,13 @@ async function main() {
 
   try {
     if (watchMode) {
+      const stopReminderChecks = startReminderChecks(db);
+
+    try {
       await watchFeedings(db, (id) => processFeeding(id, true));
+    } finally {
+      await stopReminderChecks();
+    }
     } else {
       await processFeeding(argument, process.argv[3] === '--send');
     }
