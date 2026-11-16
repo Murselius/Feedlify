@@ -5,6 +5,84 @@ import { getMessaging } from 'firebase-admin/messaging';
 
 const QUARTER_MS = 15 * 60_000;
 
+// Lähettää ruokinta-ajan muistutuksen kotitalouden etämuistutuksiin siirtyneille laitteille.
+async function sendDueReminder(
+  db: Firestore,
+  householdId: string,
+  petId: string,
+  petName: string,
+  dayNumber: number,
+  minute: number,
+): Promise<void> {
+  const household = (await db.collection('households').doc(householdId).get()).data();
+
+  if (!household || household.isDeleting || !Array.isArray(household.memberIds)) {
+    return;
+  }
+
+  const tokens = new Set<string>();
+
+  for (const userId of new Set<string>(household.memberIds)) {
+    const devices = await db.collection('users').doc(userId)
+      .collection('pushDevices')
+      .where('remoteRemindersEnabled', '==', true)
+      .get();
+
+    for (const device of devices.docs) {
+      const { platform, token } = device.data();
+
+      if (platform === 'android' && typeof token === 'string' && token.length > 0) {
+        tokens.add(token);
+      }
+    }
+  }
+
+  if (tokens.size === 0) {
+    console.log(`${petName}: etämuistutuksiin siirtyneitä laitteita ei vielä ole.`);
+    return;
+  }
+
+  // Feed-painike käyttää samaa dokumenttitunnistetta. Tarkista myös kuittaus,
+  // joka on voinut saapua vastaanottajien haun aikana.
+  const feedingId = `${petId}_${dayNumber}_${minute}`;
+  const feeding = await db.collection('feedings').doc(feedingId).get();
+
+  if (feeding.exists) {
+    console.log(`${petName}: ruokinta kuitattiin ennen lähetystä.`);
+    return;
+  }
+
+  const messaging = getMessaging();
+  let accepted = 0;
+
+  for (const token of tokens) {
+    try {
+      await messaging.send({
+        token,
+        notification: {
+          title: 'Feedlify',
+          body: `It's time to feed ${petName}`,
+        },
+        android: {
+          priority: 'high',
+          ttl: QUARTER_MS,
+          notification: {
+            channelId: 'feeding-reminders',
+            tag: `reminder-${feedingId}`,
+          },
+        },
+      });
+
+      accepted++;
+    } catch (error) {
+      const code = error instanceof Error && 'code' in error ? error.code : 'unknown';
+      console.error(`${petName}: muistutuksen lähetys epäonnistui (${code}).`);
+    }
+  }
+
+  console.log(`${petName} ${formatFeedingTime(minute)}: FCM hyväksyi ${accepted}/${tokens.size} muistutusta.`);
+}
+
 // Tarkistaa yhdelle vartille osuvat ruokinnat ja ohittaa jo kuitatut ajat.
 async function checkDueReminders(db: Firestore, at: number): Promise<void> {
   const day = getFeedingDay(new Date(at));
@@ -40,7 +118,14 @@ async function checkDueReminders(db: Firestore, at: number): Promise<void> {
     if (minute === undefined) {
       console.log(`${pet.name}: ruokinta jo kuitattu, muistutus ohitetaan.`);
     } else {
-      console.log(`${formatFeedingTime(minute)} | It's time to feed ${pet.name}`);
+        await sendDueReminder(
+          db,
+          pet.householdId,
+          document.id,
+          pet.name,
+          day.dayNumber,
+          minute,
+        );
     }
   }
 }

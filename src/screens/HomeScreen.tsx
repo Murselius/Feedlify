@@ -176,6 +176,7 @@ export default function HomeScreen({ navigation }: Props) {
     try {
       if (Platform.OS === 'android') {
         const installationId = await getInstallationId();
+        await pruneFeedingReminders(null, []);
         await unregisterPushDevice(userId, installationId);
       }
 

@@ -67,6 +67,7 @@ export function syncHouseholdReminders(
   feedings: Feeding[],
   dayStart: number,
 ): Promise<void> {
+  if (Platform.OS === 'android') return Promise.resolve();
   return enqueue(async () => {
     if (auth.currentUser?.uid !== userId) return;
 

@@ -41,6 +41,7 @@ export function registerPushDevice(
   return setDoc(deviceRef, {
     token,
     platform: 'android',
+    remoteRemindersEnabled: true,
     updatedAt: serverTimestamp(),
   });
 }
